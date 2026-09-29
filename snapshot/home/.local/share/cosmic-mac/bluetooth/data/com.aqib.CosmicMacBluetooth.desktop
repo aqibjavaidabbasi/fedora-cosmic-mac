@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Bluetooth (Mac)
+Comment=Bluetooth switch and devices menu
+Type=Application
+Exec=cosmic-mac-bluetooth
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Bluetooth;
+Icon=bluetooth-active-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=End
+X-OverflowPriority=10

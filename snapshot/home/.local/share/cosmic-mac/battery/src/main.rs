@@ -9,6 +9,7 @@
 
 mod energy;
 mod power;
+#[path = "../../shared/style.rs"]
 mod style;
 
 use std::time::Duration;

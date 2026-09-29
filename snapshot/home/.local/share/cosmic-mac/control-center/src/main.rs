@@ -17,7 +17,14 @@
 //! the COSMIC theme mode, cosmic-screenshot, GPU Screen Recorder (Flatpak or native),
 //! loginctl and cosmic-osd.
 
+#[path = "../../shared/style.rs"]
 mod style;
+#[path = "../../shared/net.rs"]
+mod net;
+#[path = "../../shared/bt.rs"]
+mod bt;
+#[path = "../../shared/menus.rs"]
+mod menus;
 
 use std::{process::Command, time::Duration};
 
@@ -65,11 +72,26 @@ struct Status {
     recorder: bool, // gpu-screen-recorder available
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Page {
+    #[default]
+    Main,
+    Wifi,
+    Bluetooth,
+}
+
 #[derive(Default)]
 struct ControlCenter {
     core: app::Core,
     popup: Option<window::Id>,
     status: Status,
+    page: Page,
+    wifi: net::State,
+    show_other: bool,
+    connecting: Option<String>,
+    bt: bt::State,
+    show_nearby: bool,
+    busy: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +103,15 @@ enum Message {
     Refreshed(Status),
     Wifi,
     Bluetooth,
+    ShowPage(Page),
+    WifiState(net::State),
+    WifiEnable(bool),
+    WifiConnect(net::Network),
+    WifiOther,
+    BtState(bt::State),
+    BtEnable(bool),
+    BtDevice(bt::Device),
+    BtNearby,
     Airplane,
     Focus,
     DarkMode,
@@ -347,6 +378,33 @@ fn pill<'a>(icon_name: &'static str, title: &'static str, subtitle: Option<Strin
         .into()
 }
 
+/// Wi-Fi/Bluetooth pill, like macOS: the round chip toggles, the rest opens the menu.
+fn split_pill<'a>(icon_name: &'static str, title: &'static str, subtitle: String, on: bool, toggle: Message, open: Message) -> Element<'a, Message> {
+    let chip = button::custom(chip_icon(icon_name, on)).class(Button::Text).padding(0).on_press(toggle);
+    let labels = button::custom(
+        container(
+            Column::new()
+                .push(text::heading(title).size(13).wrapping(Wrapping::None))
+                .push(style::secondary_small(subtitle)),
+        )
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
+    )
+    .class(Button::Text)
+    .padding(0)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .on_press(open.clone());
+    button::custom(container(row![chip, labels].spacing(8).align_y(Alignment::Center)).height(Length::Fill).align_y(Alignment::Center))
+        .class(tile_button(999.0, false))
+        .padding([0, 10])
+        .width(Length::Fixed(COL_W))
+        .height(Length::Fixed(TILE_H))
+        .on_press(open)
+        .into()
+}
+
 /// Round button with a single glyph.
 fn circle<'a>(icon_name: &'static str, active: bool, msg: Message) -> Element<'a, Message> {
     button::custom(
@@ -366,6 +424,20 @@ fn circle_pair<'a>(a: Element<'a, Message>, b: Element<'a, Message>) -> Element<
 }
 
 impl ControlCenter {
+    fn refresh_page(&self, rescan: bool) -> app::Task<Message> {
+        match self.page {
+            Page::Main => Task::none(),
+            Page::Wifi => {
+                let known = (!rescan).then(|| self.wifi.known_ssids());
+                cosmic::task::future(async move { cosmic::Action::App(Message::WifiState(net::gather(rescan, known).await)) })
+            }
+            Page::Bluetooth => {
+                let nearby = self.show_nearby;
+                cosmic::task::future(async move { cosmic::Action::App(Message::BtState(bt::gather(nearby).await)) })
+            }
+        }
+    }
+
     fn close_popup(&mut self) -> app::Task<Message> {
         match self.popup.take() {
             Some(p) => cosmic::surface::surface_task(cosmic::surface::action::destroy_popup(p)),
@@ -451,6 +523,7 @@ impl cosmic::Application for ControlCenter {
                 if self.popup.is_some() {
                     return self.close_popup();
                 }
+                self.page = Page::Main;
                 let open = cosmic::surface::surface_task(cosmic::surface::action::app_popup(
                     |_| Default::default(),
                     |app: &mut ControlCenter| {
@@ -468,12 +541,90 @@ impl cosmic::Application for ControlCenter {
                 }
             }
             Message::CheckOpen => {
+                // The request file may name a page: `echo wifi > …/open/<app id>` opens Wi-Fi.
+                let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+                let page = std::fs::read_to_string(format!("{dir}/cosmic-mac/open/{APP_ID}")).unwrap_or_default();
                 if style::open_requested(APP_ID) {
-                    return self.update(Message::TogglePopup);
+                    let target = match page.trim() {
+                        "wifi" => Page::Wifi,
+                        "bluetooth" => Page::Bluetooth,
+                        _ => Page::Main,
+                    };
+                    let opening = self.popup.is_none();
+                    let toggle = self.update(Message::TogglePopup);
+                    if opening && target != Page::Main {
+                        self.page = target;
+                        return Task::batch([toggle, self.refresh_page(true)]);
+                    }
+                    return toggle;
                 }
             }
-            Message::Refresh => return refresh_task(),
+            Message::Refresh => {
+                return match self.page {
+                    Page::Main => refresh_task(),
+                    _ => self.refresh_page(false),
+                };
+            }
             Message::Refreshed(status) => self.status = status,
+            Message::ShowPage(page) => {
+                self.page = page;
+                self.show_other = false;
+                self.show_nearby = false;
+                return self.refresh_page(true);
+            }
+            Message::WifiState(state) => {
+                if self.connecting.as_ref().is_some_and(|c| state.current().is_some_and(|n| &n.ssid == c)) {
+                    self.connecting = None;
+                }
+                self.status.wifi_on = state.enabled;
+                self.wifi = state;
+            }
+            Message::WifiEnable(on) => {
+                self.wifi.enabled = on;
+                self.status.wifi_on = on;
+                if !on {
+                    self.wifi.networks.clear();
+                }
+                net::set_enabled(on);
+            }
+            Message::WifiConnect(n) => {
+                if !n.in_use {
+                    if net::connect(&n) {
+                        self.connecting = Some(n.ssid);
+                    } else {
+                        run("cosmic-settings", &["wireless"]);
+                        return self.close_popup();
+                    }
+                }
+            }
+            Message::WifiOther => self.show_other = !self.show_other,
+            Message::BtState(state) => {
+                if let Some(mac) = &self.busy {
+                    let before = self.bt.devices.iter().find(|d| &d.mac == mac).map(|d| d.connected);
+                    let after = state.devices.iter().find(|d| &d.mac == mac).map(|d| d.connected);
+                    if before != after {
+                        self.busy = None;
+                    }
+                }
+                self.status.bluetooth_on = state.powered;
+                self.bt = state;
+            }
+            Message::BtEnable(on) => {
+                self.bt.powered = on;
+                self.status.bluetooth_on = on;
+                bt::set_powered(on);
+            }
+            Message::BtDevice(d) => {
+                bt::toggle(&d);
+                self.busy = Some(d.mac);
+            }
+            Message::BtNearby => {
+                self.show_nearby = !self.show_nearby;
+                if self.show_nearby {
+                    bt::scan();
+                    return self.refresh_page(false);
+                }
+            }
             Message::Wifi => {
                 let s = &mut self.status;
                 s.wifi_on = !s.wifi_on;
@@ -614,14 +765,55 @@ impl cosmic::Application for ControlCenter {
     }
 
     fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
+        // Wi-Fi / Bluetooth detail pages replace the grid, with a back arrow, like macOS.
+        match self.page {
+            Page::Wifi => {
+                let menu = menus::wifi(
+                    &self.wifi,
+                    self.show_other,
+                    self.connecting.as_deref(),
+                    menus::WifiMsgs {
+                        toggle: Message::WifiEnable,
+                        connect: Message::WifiConnect,
+                        other: Message::WifiOther,
+                        settings: Message::Open("wireless"),
+                        back: Some(Message::ShowPage(Page::Main)),
+                    },
+                );
+                return style::popover(Column::new().push(menu).padding([10, 0]), WIDTH);
+            }
+            Page::Bluetooth => {
+                let menu = menus::bluetooth(
+                    &self.bt,
+                    self.show_nearby,
+                    self.busy.as_deref(),
+                    menus::BtMsgs {
+                        toggle: Message::BtEnable,
+                        device: Message::BtDevice,
+                        nearby: Message::BtNearby,
+                        settings: Message::Open("bluetooth"),
+                        back: Some(Message::ShowPage(Page::Main)),
+                    },
+                );
+                return style::popover(Column::new().push(menu).padding([10, 0]), WIDTH);
+            }
+            Page::Main => {}
+        }
         let s = &self.status;
         let on_off = |on: bool| Some(if on { "On" } else { "Off" }.to_string());
 
         // Connectivity pills + Now Playing
         let wifi_sub = if s.wifi_on { s.wifi_name.clone().unwrap_or_else(|| "Not Connected".into()) } else { "Off".into() };
         let conn = Column::new()
-            .push(pill("network-wireless-signal-excellent-symbolic", "Wi-Fi", Some(wifi_sub), s.wifi_on, Message::Wifi))
-            .push(pill("bluetooth-active-symbolic", "Bluetooth", on_off(s.bluetooth_on), s.bluetooth_on, Message::Bluetooth))
+            .push(split_pill("network-wireless-signal-excellent-symbolic", "Wi-Fi", wifi_sub, s.wifi_on, Message::Wifi, Message::ShowPage(Page::Wifi)))
+            .push(split_pill(
+                "bluetooth-active-symbolic",
+                "Bluetooth",
+                if s.bluetooth_on { "On" } else { "Off" }.to_string(),
+                s.bluetooth_on,
+                Message::Bluetooth,
+                Message::ShowPage(Page::Bluetooth),
+            ))
             .spacing(GAP);
         let block1 = row![conn, self.now_playing()].spacing(GAP);
 

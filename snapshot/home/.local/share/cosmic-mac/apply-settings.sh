@@ -36,11 +36,10 @@ put $P/plugins_wings 'Some(([
     "com.system76.CosmicPanelLauncherButton",
     "com.system76.CosmicPanelWorkspacesButton",
 ], [
-    "com.system76.CosmicAppletBluetooth",
+    "com.aqib.CosmicMacBluetooth",
     "io.github.cosmic_utils.minimon-applet",
     "io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager",
     "com.github.codevardhan.caffeine-applet",
-    "io.github.marcelogomes90.cosmic-ext-applet-status-hub",
     "com.aqib.CosmicMacBattery",
     "com.aqib.CosmicMacWifi",
     "com.aqib.CosmicMacControlCenter",

@@ -10,8 +10,8 @@ fn apply(builder_cfg: cosmic_config::Config, theme_cfg: cosmic_config::Config, l
     // Liquid-glass-like: blurred see-through panel, applet popups and system UI.
     b.frosted = BlurStrength::High;
     b.frosted_panel = true;
-    b.frosted_applets = true;
-    b.frosted_system_interface = true;
+    b.frosted_applets = false; // menus stay solid and readable (COSMIC blur is too faint behind text)
+    b.frosted_system_interface = false; // notifications, launcher, OSD: solid
     b.frosted_windows = false; // app windows stay solid, like macOS
     b.corner_radii = CornerRadii {
         radius_0: [0.0; 4],
