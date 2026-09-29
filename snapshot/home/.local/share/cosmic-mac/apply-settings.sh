@@ -36,6 +36,7 @@ put $P/plugins_wings 'Some(([
     "com.system76.CosmicPanelLauncherButton",
     "com.system76.CosmicPanelWorkspacesButton",
 ], [
+    "com.system76.CosmicAppletBluetooth",
     "com.aqib.CosmicMacBattery",
     "io.github.cosmic_utils.minimon-applet",
     "io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager",
