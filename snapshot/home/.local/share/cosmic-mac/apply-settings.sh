@@ -38,7 +38,6 @@ put $P/plugins_wings 'Some(([
 ], [
     "com.aqib.CosmicMacBluetooth",
     "com.aqib.CosmicMacStats",
-    "io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager",
     "com.github.codevardhan.caffeine-applet",
     "com.aqib.CosmicMacBattery",
     "com.aqib.CosmicMacWifi",

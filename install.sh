@@ -41,7 +41,6 @@ fi
 step "Installing top bar applets and the screen recorder (Flatpak)"
 flatpak remote-add --user --if-not-exists cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
 flatpak install --user -y --noninteractive cosmic \
-    io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager \
     com.github.codevardhan.caffeine-applet || echo "Some applets failed to install; the rest still works."
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install --user -y --noninteractive flathub com.dec05eba.gpu_screen_recorder \
