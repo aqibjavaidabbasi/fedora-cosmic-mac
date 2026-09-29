@@ -15,12 +15,10 @@ use std::time::Duration;
 
 use cosmic::{
     Element, Task, app,
-    applet::{menu_button, padded_control},
-    cosmic_theme::Spacing,
     iced::{Alignment, Length, Subscription, time, window},
     surface,
-    theme::{self, Button},
-    widget::{Column, button, container, divider, icon, row, space, text, toggler},
+    theme::Button,
+    widget::{Column, button, container, icon, row, text},
 };
 
 use power::{Charge, Event, Snapshot};
@@ -51,6 +49,7 @@ enum Message {
     LowPowerDone(Result<(), String>),
     SampleEnergy,
     OpenSettings,
+    CheckOpenRequest,
 }
 
 /// Run a command in the background, reaping it on a thread.
@@ -167,6 +166,11 @@ impl cosmic::Application for Battery {
             Message::LowPowerDone(Ok(())) => {}
             Message::LowPowerDone(Err(e)) => self.error = Some(e),
             Message::SampleEnergy => self.heavy_apps = self.sampler.sample(),
+            Message::CheckOpenRequest => {
+                if style::open_requested(APP_ID) {
+                    return self.update(Message::TogglePopup);
+                }
+            }
             Message::OpenSettings => {
                 run("cosmic-settings", &["power"]);
                 return self.close_popup();
@@ -195,91 +199,91 @@ impl cosmic::Application for Battery {
     }
 
     fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
-        let Spacing { space_xxs, space_xs, space_s, .. } = theme::active().cosmic().spacing;
-        let sep = || padded_control(divider::horizontal::default()).padding([space_xxs, space_s]);
+        // Layout follows the macOS Tahoe battery menu:
+        //   Battery / Power Source: … / ─ / Energy Mode / (●) Low Power / ─ /
+        //   No Apps Using Significant Energy / ─ / Battery Settings…
+        let item = |content: Element<'static, Message>| container(content).padding([4, 14]).width(Length::Fill);
 
         let Some(s) = &self.snap else {
-            let msg = self.error.as_deref().unwrap_or("Reading battery…");
-            return self.core.applet.popup_container(padded_control(text::body(msg.to_string()))).into();
+            let msg = self.error.clone().unwrap_or_else(|| "Reading battery…".to_string());
+            return style::popover(Column::new().push(item(style::secondary(msg))).padding([10, 0]), 300.0);
         };
 
-        // Header: "Battery                54%"
-        let header = padded_control(
-            row![
-                text::heading("Battery").width(Length::Fill),
-                text::heading(format!("{:.0}%", s.percent)),
-            ]
-            .align_y(Alignment::Center),
-        );
-        let source = if s.on_battery { "Power Source: Battery" } else { "Power Source: Power Adapter" };
+        let mut status = Column::new().spacing(2).push(style::secondary(if s.on_battery {
+            "Power Source: Battery"
+        } else {
+            "Power Source: Power Adapter"
+        }));
         let remaining = match (s.charge, s.remaining) {
-            (Charge::Discharging, Some(d)) => Some(format!("{} remaining", format_remaining(d))),
             (Charge::Charging, Some(d)) => Some(format!("{} until full", format_remaining(d))),
             (Charge::NotCharging, _) => Some("Not Charging".to_string()),
             _ => None,
         };
-        let mut status = Column::new().spacing(2).push(text::caption(source));
         if let Some(r) = remaining {
-            status = status.push(text::caption(r));
+            status = status.push(style::secondary(r));
         }
 
-        // Energy Mode card with Low Power Mode toggle
+        // Energy Mode: a round badge that is blue while Low Power is on; the whole row toggles it.
         let low_power_on = s.low_power.unwrap_or(false);
-        let mut lp_toggle = toggler(low_power_on);
-        if s.low_power.is_some() {
-            lp_toggle = lp_toggle.on_toggle(Message::LowPower);
-        }
-        let lp_badge = container(icon::from_name("power-profile-power-saver-symbolic").size(16).symbolic(true))
-            .padding(6)
+        let lp_badge = container(icon::from_name("battery-level-30-symbolic").size(16).symbolic(true))
+            .width(Length::Fixed(28.0))
+            .height(Length::Fixed(28.0))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
             .class(style::badge(low_power_on));
-        let lp_label = Column::new().push(text::body("Low Power Mode")).push(text::caption(
-            if s.low_power.is_some() { "Reduces energy use" } else { "Power profiles unavailable" },
-        ));
-        let card = container(
-            row![lp_badge, lp_label, space::horizontal(), lp_toggle]
-                .spacing(space_xs)
-                .align_y(Alignment::Center),
+        let mut lp_row = button::custom(
+            row![lp_badge, text::body("Low Power")].spacing(10).align_y(Alignment::Center),
         )
-        .padding(space_xs)
-        .width(Length::Fill)
-        .class(style::card());
+        .class(Button::AppletMenu)
+        .padding([4, 14])
+        .width(Length::Fill);
+        if s.low_power.is_some() {
+            lp_row = lp_row.on_press(Message::LowPower(!low_power_on));
+        }
 
-        // Apps using significant energy
-        let mut apps = Column::new().spacing(space_xxs).push(text::caption_heading("Using Significant Energy"));
+        let mut apps = Column::new().spacing(4);
         if self.heavy_apps.is_empty() {
-            apps = apps.push(text::body("No Apps Using Significant Energy"));
+            apps = apps.push(style::secondary("No Apps Using Significant Energy"));
         } else {
+            apps = apps.push(style::section("Using Significant Energy"));
             for name in &self.heavy_apps {
                 apps = apps.push(text::body(name.clone()));
             }
         }
 
         let mut content = Column::new()
-            .push(header)
-            .push(padded_control(status))
-            .push(sep())
-            .push(padded_control(
-                Column::new().spacing(space_xxs).push(text::caption_heading("Energy Mode")).push(card),
-            ))
-            .push(sep())
-            .push(padded_control(apps));
+            .push(item(text::heading("Battery").into()))
+            .push(item(status.into()))
+            .push(style::separator())
+            .push(item(style::section("Energy Mode")))
+            .push(lp_row)
+            .push(style::separator())
+            .push(item(apps.into()));
         if let Some(e) = &self.error {
-            content = content.push(padded_control(text::caption(format!("⚠ {e}"))));
+            content = content.push(item(style::secondary(format!("⚠ {e}"))));
         }
         content = content
-            .push(sep())
-            .push(menu_button(text::body("Battery Settings…")).on_press(Message::OpenSettings))
-            .padding([8, 0]);
+            .push(style::separator())
+            .push(
+                button::custom(text::body("Battery Settings…"))
+                    .class(Button::AppletMenu)
+                    .padding([4, 14])
+                    .width(Length::Fill)
+                    .on_press(Message::OpenSettings),
+            )
+            .padding([10, 0])
+            .spacing(2);
 
-        self.core.applet.popup_container(content).into()
+        style::popover(content, 300.0)
     }
 
     fn subscription(&self) -> Subscription<Message> {
         let power = power::subscription().map(Message::Power);
+        let open = time::every(Duration::from_millis(500)).map(|_| Message::CheckOpenRequest);
         if self.popup.is_some() {
-            Subscription::batch([power, time::every(Duration::from_secs(3)).map(|_| Message::SampleEnergy)])
+            Subscription::batch([power, open, time::every(Duration::from_secs(3)).map(|_| Message::SampleEnergy)])
         } else {
-            power
+            Subscription::batch([power, open])
         }
     }
 

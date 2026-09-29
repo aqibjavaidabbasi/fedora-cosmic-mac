@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Wi-Fi (Mac)
+Comment=Wi-Fi status and network menu
+Type=Application
+Exec=cosmic-mac-wifi
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Wi-Fi;Network;
+Icon=network-wireless-signal-excellent-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=End
+X-OverflowPriority=10

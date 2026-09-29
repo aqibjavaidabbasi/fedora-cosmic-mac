@@ -46,7 +46,8 @@ if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$AVER" cosmic-applet-notifications-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-panel 2>/dev/null)" cosmic-panel-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-workspaces 2>/dev/null)" cosmic-workspaces-built-version \
-   && [ -x "$HOME/.local/bin/cosmic-mac-control-center" ] && [ -x "$HOME/.local/bin/cosmic-mac-battery" ]; then
+   && [ -x "$HOME/.local/bin/cosmic-mac-control-center" ] && [ -x "$HOME/.local/bin/cosmic-mac-battery" ] \
+   && [ -x "$HOME/.local/bin/cosmic-mac-wifi" ]; then
     echo "Already built for COSMIC $VER (applets $AVER, Fedora $REL)."
     exit 0
 fi
@@ -186,6 +187,7 @@ build_app() {
 }
 build_app control-center cosmic-mac-control-center
 build_app battery cosmic-mac-battery
+build_app wifi cosmic-mac-wifi
 
 # Settings are NOT re-applied here, so anything changed in COSMIC Settings survives
 # updates. Only the per-display top bars are refreshed from their template.
