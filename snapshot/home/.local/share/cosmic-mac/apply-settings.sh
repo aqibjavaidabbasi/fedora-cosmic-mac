@@ -16,15 +16,28 @@ put $C/com.system76.CosmicComp/v1/workspaces '(
 # --- Touchpad: no tap-to-click, natural scroll, pause while typing ---------
 put $C/com.system76.CosmicComp/v1/input_touchpad '(state:Enabled,click_method:Some(Clickfinger),disable_while_typing:Some(true),scroll_config:Some((method:Some(TwoFinger),natural_scroll:Some(true),scroll_button:None,scroll_factor:None)),tap_config:Some((enabled:false,button_map:Some(LeftRightMiddle),drag:true,drag_lock:false)))'
 
-# --- Dock: floating glass, hides when a window covers it, apps only --------
+# --- Dock: macOS shelf. Glass rounded rectangle; apps | minimized, Downloads, Trash ---
 D=$C/com.system76.CosmicPanel.Dock/v1
 put $D/autohide OnOverlap
+put $D/autohide_behavior '(
+    wait_time: 1000,
+    transition_time: 200,
+    handle_size: 4,
+    unhide_delay: 100,
+)'
 put $D/exclusive_zone false
 put $D/keep_style_on_maximize true
-put $D/opacity 0.5
+put $D/opacity 0.55
+put $D/border_radius 24
+put $D/padding 6
+put $D/spacing 6
+put $D/margin 8
 put $D/plugins_center 'Some([
     "com.system76.CosmicAppList",
+    "com.aqib.DockSeparator",
     "com.system76.CosmicAppletMinimize",
+    "com.aqib.DockDownloads",
+    "com.aqib.DockTrash",
 ])'
 
 # --- Top bar: Mac layout, clock on the right, nearly transparent -----------
@@ -91,10 +104,14 @@ fi
 # --- Top-left bar: one icon (Applications), the other buttons as text --------
 # "*/<app>" keys are per-button settings understood by the patched
 # cosmic-panel-button (see rebuild.sh); the stock one ignores them.
-put $C/com.system76.CosmicPanelButton/v1/configs '{
-    "*/com.system76.CosmicAppLibrary": (force_presentation: Some(Icon)),
-    "Dock": (force_presentation: Some(Icon)),
-}'
+# Dock Downloads/Trash use MacTahoe's full-colour folder and bin.
+PL=$HOME/.local/share/icons/MacTahoe/places/scalable
+put $C/com.system76.CosmicPanelButton/v1/configs "{
+    \"*/com.system76.CosmicAppLibrary\": (force_presentation: Some(Icon)),
+    \"*/com.aqib.Downloads\": (force_presentation: Some(Icon), icon: Some(\"$PL/folder-download.svg\")),
+    \"*/com.aqib.Trash\": (force_presentation: Some(Icon), icon: Some(\"$PL/user-trash.svg\")),
+    \"Dock\": (force_presentation: Some(Icon)),
+}"
 
 # --- Icons, font, compact title bars ---------------------------------------
 K=$C/com.system76.CosmicTk/v1

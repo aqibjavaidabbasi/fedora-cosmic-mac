@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Trash (Dock)
+Comment=Trash button for the Mac-style dock
+Type=Application
+Exec=cosmic-panel-button com.aqib.Trash
+Terminal=false
+Categories=COSMIC;
+Icon=user-trash
+NoDisplay=true
+X-CosmicApplet=true
+X-OverflowPriority=10

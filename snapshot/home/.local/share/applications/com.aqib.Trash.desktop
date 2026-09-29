@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Trash
+Comment=Open the Trash
+Type=Application
+Exec=sh -c 'mkdir -p "$HOME/.local/share/Trash/files"; cosmic-files "$HOME/.local/share/Trash/files"'
+Icon=user-trash
+Terminal=false
+NoDisplay=true

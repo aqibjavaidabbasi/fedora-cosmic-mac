@@ -1,4 +1,6 @@
 {
+    "*/com.aqib.Downloads": (force_presentation: Some(Icon), icon: Some("/home/aqibj/.local/share/icons/MacTahoe/places/scalable/folder-download.svg")),
+    "*/com.aqib.Trash": (force_presentation: Some(Icon), icon: Some("/home/aqibj/.local/share/icons/MacTahoe/places/scalable/user-trash.svg")),
     "*/com.system76.CosmicAppLibrary": (force_presentation: Some(Icon), icon: Some("/home/aqibj/Downloads/favicon.png")),
     "Dock": (force_presentation: Some(Icon)),
 }

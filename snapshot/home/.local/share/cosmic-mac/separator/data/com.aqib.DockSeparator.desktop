@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Dock Separator (Mac)
+Comment=Thin divider line between dock sections
+Type=Application
+Exec=cosmic-mac-separator
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Separator;Dock;
+Icon=view-more-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-OverflowPriority=0

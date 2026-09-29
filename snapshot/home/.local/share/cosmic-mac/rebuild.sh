@@ -193,6 +193,7 @@ build_app battery cosmic-mac-battery
 build_app wifi cosmic-mac-wifi
 build_app bluetooth cosmic-mac-bluetooth
 build_app stats cosmic-mac-stats
+build_app separator cosmic-mac-separator
 
 # Settings are NOT re-applied here, so anything changed in COSMIC Settings survives
 # updates. Only the per-display top bars are refreshed from their template.

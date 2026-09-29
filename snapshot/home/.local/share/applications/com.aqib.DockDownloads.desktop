@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Downloads (Dock)
+Comment=Downloads button for the Mac-style dock
+Type=Application
+Exec=cosmic-panel-button com.aqib.Downloads
+Terminal=false
+Categories=COSMIC;
+Icon=folder-download
+NoDisplay=true
+X-CosmicApplet=true
+X-OverflowPriority=10

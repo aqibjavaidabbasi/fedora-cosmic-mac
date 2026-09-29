@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Downloads
+Comment=Open your Downloads folder
+Type=Application
+Exec=sh -c 'cosmic-files "$HOME/Downloads"'
+Icon=folder-download
+Terminal=false
+NoDisplay=true
