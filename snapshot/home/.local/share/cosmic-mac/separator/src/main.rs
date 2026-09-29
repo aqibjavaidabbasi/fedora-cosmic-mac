@@ -1,5 +1,5 @@
-//! A thin vertical divider for the COSMIC dock, like the line in the macOS Dock
-//! between apps and the Downloads/Trash stacks. Horizontal on a vertical dock.
+//! A thin divider for the COSMIC dock, like the line in the macOS Dock between
+//! apps and the Downloads/Trash stacks, drawn on its slice of the glass shelf.
 
 use cosmic::{
     Element, Task, app,
@@ -40,10 +40,16 @@ impl cosmic::Application for Separator {
     }
 
     fn view(&self) -> Element<'_, ()> {
-        let (size, _) = self.core.applet.suggested_size(false);
-        let (_, pad) = self.core.applet.suggested_padding(false);
-        let long = (size + 2 * pad) as f32 * 0.7;
+        // A 1px line on its own slice of the macOS glass shelf (see patches/dock.py):
+        // the shelf is the bottom (icon + 16)px of the dock, where icon is 80% of the
+        // panel's icon size; above it the dock is transparent.
+        let (full, _) = self.core.applet.suggested_size(false);
+        let (_, cross) = self.core.applet.suggested_padding(false);
+        let total = (full + 2 * cross) as f32;
+        let shelf_h = ((full as f32) * 0.8).round() + 16.0;
         let line = container(space::horizontal())
+            .width(Length::Fixed(1.0))
+            .height(Length::Fixed(shelf_h * 0.6))
             .class(theme::Container::custom(|t| cosmic::iced::widget::container::Style {
                 background: Some(Background::Color({
                     let mut c: Color = t.cosmic().on_bg_color().into();
@@ -52,13 +58,20 @@ impl cosmic::Application for Separator {
                 })),
                 ..Default::default()
             }));
-        let line = if self.core.applet.is_horizontal() {
-            line.width(Length::Fixed(1.0)).height(Length::Fixed(long))
-        } else {
-            line.width(Length::Fixed(long)).height(Length::Fixed(1.0))
-        };
-        let outer = container(line).padding(if self.core.applet.is_horizontal() { [0, 6] } else { [6, 0] });
-        self.core.applet.autosize_window(outer).into()
+        let shelf = container(line)
+            .width(Length::Fill)
+            .height(Length::Fixed(shelf_h))
+            .center_x(Length::Fill)
+            .center_y(Length::Fixed(shelf_h))
+            .class(theme::Container::custom(|t| {
+                let mut bg: Color = t.cosmic().background(false).base.into();
+                bg.a = 0.55;
+                cosmic::iced::widget::container::Style { background: Some(Background::Color(bg)), ..Default::default() }
+            }));
+        let slice = cosmic::widget::column::with_children(vec![space::vertical().height(Length::Fill).into(), shelf.into()])
+            .width(Length::Fixed(13.0))
+            .height(Length::Fixed(total));
+        self.core.applet.autosize_window(slice).into()
     }
 
     fn style(&self) -> Option<cosmic::iced::theme::Style> {

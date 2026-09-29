@@ -58,26 +58,83 @@ if n3 != 1 or n4 != 1:
 open(p, "w").write(s)
 
 # ---------------------------------------------------------------------------
-# macOS Dock: buttons in a bottom dock (Downloads, Trash, App Library) use the
-# same icon size, headroom and tight spacing as the patched Dock app icons.
+# macOS Dock: buttons in the bottom dock (Downloads, Trash) match the patched
+# Dock app icons (patches/dock.py): 80% icons sitting 8px above the dock edge,
+# no highlight behind them, and their own slice of the glass shelf (the Trash
+# button rounds the shelf's right end).
 s = open(p).read()
 s, n5 = re.subn(
     r"(        let symbolic = icon\.symbolic;\n)",
     r"""\1        let dock = !symbolic && matches!(self.core.applet.anchor, PanelAnchor::Bottom);
-        let (suggested, horizontal_padding, head) = if dock {
+        let total = suggested.1 + 2 * vertical_padding;
+        let (suggested, horizontal_padding) = if dock {
             let small = ((suggested.0 as f32) * 0.8).round() as u16;
-            ((small, small), ((horizontal_padding as f32) * 0.3).max(2.0) as u16, suggested.1 - small)
+            ((small, small), ((horizontal_padding as f32) * 0.3).max(2.0) as u16)
         } else {
-            (suggested, horizontal_padding, 0)
+            (suggested, horizontal_padding)
         };
+        let (pad_top, pad_bottom) = if dock { ((total - suggested.1 - 8) as f32, 8.0) } else { (0.0, 0.0) };
 """, s, count=1)
 s, n6 = re.subn(
-    r"            \.center\(Length::Fill\),\n        \)\n        \.width\(Length::Fixed\(\(suggested\.0 \+ 2 \* horizontal_padding\) as f32\)\)\n        \.height\(Length::Fixed\(\(suggested\.1 \+ 2 \* vertical_padding\) as f32\)\)",
-    "            .padding([head as f32, 0.0, 0.0, 0.0])\n"
+    r"            \.center\(Length::Fill\),\n        \)\n        \.width\(Length::Fixed\(\(suggested\.0 \+ 2 \* horizontal_padding\) as f32\)\)\n        \.height\(Length::Fixed\(\(suggested\.1 \+ 2 \* vertical_padding\) as f32\)\)\n        \.class\(cosmic::theme::Button::AppletIcon\)",
+    "            .padding([pad_top, 0.0, pad_bottom, 0.0])\n"
     "            .center(Length::Fill),\n        )\n"
     "        .width(Length::Fixed((suggested.0 + 2 * horizontal_padding) as f32))\n"
-    "        .height(Length::Fixed((suggested.1 + head + 2 * vertical_padding) as f32))",
+    "        .height(Length::Fixed(if dock { total as f32 } else { (suggested.1 + 2 * vertical_padding) as f32 }))\n"
+    "        .class(if dock { mac_clear_button() } else { cosmic::theme::Button::AppletIcon })",
     s, count=1)
-if n5 != 1 or n6 != 1:
+s, n7 = re.subn(r"        autosize::autosize\(\n            if ",
+    "        autosize::autosize(\n            mac_dock_shelf(&self.core.applet, std::env::args().nth(1).unwrap_or_default().ends_with(\".Trash\"), if ", s, count=1)
+s, n8 = re.subn(r"(                    \.into\(\)\n            \})(,\n            AUTOSIZE_MAIN_ID\.clone\(\),)", r"\1)\2", s, count=1)
+s, n9 = re.subn(r"(\nimpl Button \{\n)", r"""
+/// A Dock button draws no highlight behind its icon, like macOS.
+fn mac_clear_button() -> cosmic::theme::Button {
+    let clear = |mut st: cosmic::widget::button::Style| {
+        st.background = None;
+        st.border_width = 0.0;
+        st.outline_width = 0.0;
+        st
+    };
+    let base = |f: bool, t: &cosmic::Theme| {
+        cosmic::widget::button::Catalog::active(t, f, false, &cosmic::theme::Button::AppletIcon)
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |f, t| clear(base(f, t))),
+        hovered: Box::new(move |f, t| clear(base(f, t))),
+        pressed: Box::new(move |f, t| clear(base(f, t))),
+        disabled: Box::new(move |t| clear(base(false, t))),
+    }
+}
+
+/// In the bottom Dock, draw this button's slice of the glass shelf under it.
+fn mac_dock_shelf<'a>(applet: &cosmic::applet::Context, round_right: bool, content: cosmic::Element<'a, Msg>) -> cosmic::Element<'a, Msg> {
+    if !matches!(applet.anchor, PanelAnchor::Bottom) {
+        return content;
+    }
+    let icon = ((applet.suggested_size(false).0 as f32) * 0.8).round();
+    let shelf = cosmic::iced::widget::Column::new()
+        .push(space::vertical().height(Length::Fill))
+        .push(
+            cosmic::widget::container(space::horizontal())
+                .width(Length::Fill)
+                .height(Length::Fixed(icon + 16.0))
+                .class(cosmic::theme::Container::custom(move |t| {
+                    let mut bg: cosmic::iced::Color = t.cosmic().background(false).base.into();
+                    bg.a = 0.55;
+                    let r = if round_right { 18.0 } else { 0.0 };
+                    cosmic::iced::widget::container::Style {
+                        background: Some(cosmic::iced::Background::Color(bg)),
+                        border: cosmic::iced::Border { radius: [0.0, r, r, 0.0].into(), ..Default::default() },
+                        ..Default::default()
+                    }
+                })),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill);
+    cosmic::iced::widget::Stack::new().push(content).push_under(shelf).into()
+}
+\1""", s, count=1)
+if (n5, n6, n7, n8, n9) != (1, 1, 1, 1, 1):
+    print("panel-button dock patch failed", (n5, n6, n7, n8, n9), file=sys.stderr)
     sys.exit(1)
 open(p, "w").write(s)

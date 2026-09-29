@@ -1,13 +1,12 @@
 diff --git a/cosmic-app-list/src/app.rs b/cosmic-app-list/src/app.rs
-index 8db96ee..36b2e06 100755
+index 8db96ee..076426a 100755
 --- a/cosmic-app-list/src/app.rs
 +++ b/cosmic-app-list/src/app.rs
-@@ -83,10 +83,33 @@ struct AppletIconData {
+@@ -83,10 +83,62 @@ struct AppletIconData {
  
  static DND_FAVORITES: u64 = u64::MAX;
  
-+// ---- macOS Dock magnification (cosmic-mac patches/dock.py) ----
-+const MAC_MAG: f32 = 1.45;
++// ---- macOS Dock (cosmic-mac patches/dock.py) ----
 +thread_local! {
 +    /// Pointer position along the Dock, in the (magnified) layout's coordinates.
 +    static MAC_HOVER: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
@@ -15,21 +14,51 @@ index 8db96ee..36b2e06 100755
 +    static MAC_SCALE: std::cell::RefCell<FxHashMap<u32, f32>> = std::cell::RefCell::new(FxHashMap::default());
 +}
 +
-+/// Smooth bell: MAC_MAG right under the pointer, 1.0 two and a bit icons away.
-+fn mac_scale_at(distance: f32, slot: f32) -> f32 {
-+    let r = slot * 2.2;
-+    if distance.abs() >= r {
-+        1.0
-+    } else {
-+        1.0 + (MAC_MAG - 1.0) * (1.0 + (std::f32::consts::PI * distance / r).cos()) / 2.0
++/// Magnification by distance (in icons) from the hovered one.
++fn mac_step(d: usize) -> f32 {
++    match d {
++        0 => 1.45,
++        1 => 1.2,
++        2 => 1.07,
++        _ => 1.0,
 +    }
++}
++
++/// Height of the glass shelf for a given icon size: 8px below and above the icon.
++pub fn mac_shelf_height(icon: u16) -> f32 {
++    icon as f32 + 16.0
++}
++
++/// The glass shelf slice: translucent theme background, rounded on the chosen ends.
++pub fn mac_shelf(round_left: bool, round_right: bool) -> theme::Container<'static> {
++    theme::Container::custom(move |t| {
++        let c = t.cosmic();
++        let mut bg: iced::Color = c.background(false).base.into();
++        bg.a = 0.55;
++        let r = 18.0;
++        container::Style {
++            background: Some(Background::Color(bg)),
++            border: Border {
++                radius: [
++                    if round_left { r } else { 0.0 },
++                    if round_right { r } else { 0.0 },
++                    if round_right { r } else { 0.0 },
++                    if round_left { r } else { 0.0 },
++                ]
++                .into(),
++                width: 0.0,
++                color: iced::Color::TRANSPARENT,
++            },
++            ..Default::default()
++        }
++    })
 +}
 +
  impl AppletIconData {
      fn new(applet: &Context) -> Self {
 -        let icon_size = applet.suggested_size(false).0;
-+        // macOS Dock (cosmic-mac patches/dock.py): icons at 80% of the slot, the rest is
-+        // headroom for hover magnification; icons close together along the Dock.
++        // macOS Dock (cosmic-mac patches/dock.py): icons at 80% of the panel's icon size,
++        // close together; the space above them is headroom for magnification.
 +        let full_icon = applet.suggested_size(false).0;
 +        let icon_size = ((full_icon as f32) * 0.8).round() as u16;
          let (major_padding, cross_padding) = applet.suggested_padding(false);
@@ -37,22 +66,25 @@ index 8db96ee..36b2e06 100755
          let (h_padding, v_padding) = if applet.is_horizontal() {
              (major_padding as f32, cross_padding as f32)
          } else {
-@@ -136,6 +159,14 @@ impl AppletIconData {
+@@ -136,6 +188,17 @@ impl AppletIconData {
                  h_padding,
              ],
          };
-+        let mac_head = (full_icon - icon_size) as f32;
++        // Surface thickness stays full_icon + 2 * cross padding; the icon (plus its
++        // 5px running-dot row) sits 3px from the dock's outer edge, the rest is headroom.
++        let mac_total = (full_icon + 2 * cross_padding) as f32;
++        let mac_head = (mac_total - icon_size as f32 - 5.0 - 3.0).max(0.0);
 +        let mut padding = padding;
 +        match applet.anchor {
-+            PanelAnchor::Bottom => padding[0] += mac_head,
-+            PanelAnchor::Top => padding[2] += mac_head,
-+            PanelAnchor::Left => padding[1] += mac_head,
-+            PanelAnchor::Right => padding[3] += mac_head,
++            PanelAnchor::Bottom => { padding[0] = mac_head; padding[2] = 3.0; }
++            PanelAnchor::Top => { padding[2] = mac_head; padding[0] = 3.0; }
++            PanelAnchor::Left => { padding[1] = mac_head; padding[3] = 3.0; }
++            PanelAnchor::Right => { padding[3] = mac_head; padding[1] = 3.0; }
 +        }
          AppletIconData {
              icon_size,
              icon_spacing,
-@@ -209,14 +240,24 @@ impl DockItem {
+@@ -209,14 +272,24 @@ impl DockItem {
          let toplevel_count = filtered_toplevels.len();
  
          let app_icon = AppletIconData::new(applet);
@@ -79,7 +111,7 @@ index 8db96ee..36b2e06 100755
  
          let indicator = {
              let container = if toplevel_count <= 1 {
-@@ -390,6 +431,7 @@ pub enum PopupType {
+@@ -390,6 +463,7 @@ pub enum PopupType {
  #[derive(Debug, Clone)]
  enum Message {
      Wayland(WaylandUpdate),
@@ -87,7 +119,31 @@ index 8db96ee..36b2e06 100755
      PinApp(u32),
      UnpinApp(u32),
      Popup(u32, window::Id),
-@@ -889,6 +931,10 @@ impl cosmic::Application for CosmicAppList {
+@@ -598,7 +672,22 @@ fn window_menu_style(selected: bool) -> cosmic::theme::Button {
+     }
+ }
+ 
+-fn app_list_icon_style(selected: bool) -> cosmic::theme::Button {
++fn app_list_icon_style(_selected: bool) -> cosmic::theme::Button {
++    // macOS Dock: no background behind icons in any state (cosmic-mac patches/dock.py).
++    let clear = |mut st: button::Style| {
++        st.background = None;
++        st.border_width = 0.0;
++        st.outline_width = 0.0;
++        st
++    };
++    return Button::Custom {
++        active: Box::new(move |f, t| clear(button::Catalog::active(t, f, false, &Button::AppletIcon))),
++        hovered: Box::new(move |f, t| clear(button::Catalog::active(t, f, false, &Button::AppletIcon))),
++        disabled: Box::new(move |t| clear(button::Catalog::disabled(t, &Button::AppletIcon))),
++        pressed: Box::new(move |f, t| clear(button::Catalog::active(t, f, false, &Button::AppletIcon))),
++    };
++    #[allow(unreachable_code)]
++    let selected = _selected;
+     Button::Custom {
+         active: Box::new(move |focused, theme| {
+             let a = button::Catalog::active(theme, focused, selected, &Button::AppletIcon);
+@@ -889,6 +978,10 @@ impl cosmic::Application for CosmicAppList {
  
      fn update(&mut self, message: Self::Message) -> app::Task<Self::Message> {
          match message {
@@ -98,7 +154,7 @@ index 8db96ee..36b2e06 100755
              Message::Popup(id, parent_window_id) => {
                  if let Some(Popup {
                      parent,
-@@ -1763,6 +1809,53 @@ impl cosmic::Application for CosmicAppList {
+@@ -1763,6 +1856,45 @@ impl cosmic::Application for CosmicAppList {
              PanelAnchor::Top | PanelAnchor::Bottom => true,
              PanelAnchor::Left | PanelAnchor::Right => false,
          };
@@ -116,35 +172,27 @@ index 8db96ee..36b2e06 100755
 +                .collect();
 +            let pinned_ids: Vec<u32> = self.pinned_list.iter().map(|d| d.id).collect();
 +            let gap = if !pinned_ids.is_empty() && !active_ids.is_empty() { 9.0 } else { 0.0 };
++            let ids: Vec<u32> = pinned_ids.iter().chain(active_ids.iter()).copied().collect();
 +            let old = MAC_SCALE.with(|m| m.borrow().clone());
 +            let mut map = FxHashMap::default();
 +            if let Some(pointer) = MAC_HOVER.with(|h| h.get()) {
-+                // Map the pointer back into un-magnified coordinates using the widths
-+                // currently on screen, so growing icons don't move the target.
++                // Which icon is under the pointer, measured with the widths now on screen.
 +                let mut at = 0.0f32;
-+                let mut base = 0.0f32;
-+                let mut base_x = None;
-+                for (k, id) in pinned_ids.iter().chain(active_ids.iter()).enumerate() {
++                let mut hovered = None;
++                for (k, id) in ids.iter().enumerate() {
 +                    if k == pinned_ids.len() {
 +                        at += gap;
-+                        base += gap;
 +                    }
-+                    let w = slot + app_icon.icon_size as f32 * (old.get(id).copied().unwrap_or(1.0) - 1.0);
-+                    if pointer < at + w {
-+                        base_x = Some(base + (pointer - at).max(0.0) / w * slot);
++                    at += slot + app_icon.icon_size as f32 * (old.get(id).copied().unwrap_or(1.0) - 1.0);
++                    if pointer < at {
++                        hovered = Some(k);
 +                        break;
 +                    }
-+                    at += w;
-+                    base += slot;
 +                }
-+                let base_x = base_x.unwrap_or(base);
-+                let mut c = 0.0f32;
-+                for (k, id) in pinned_ids.iter().chain(active_ids.iter()).enumerate() {
-+                    if k == pinned_ids.len() {
-+                        c += gap;
++                if let Some(h) = hovered {
++                    for (k, id) in ids.iter().enumerate() {
++                        map.insert(*id, mac_step(k.abs_diff(h)));
 +                    }
-+                    map.insert(*id, mac_scale_at(base_x - (c + slot / 2.0), slot));
-+                    c += slot;
 +                }
 +            }
 +            MAC_SCALE.with(|m| *m.borrow_mut() = map);
@@ -152,10 +200,26 @@ index 8db96ee..36b2e06 100755
          let divider_padding = match self.core.applet.size {
              Size::Hardcoded(_) => 4,
              Size::PanelSize(ref s) => {
-@@ -2074,6 +2167,9 @@ impl cosmic::Application for CosmicAppList {
+@@ -2074,6 +2206,25 @@ impl cosmic::Application for CosmicAppList {
              }
          }
  
++        let shelf_h = mac_shelf_height(app_icon.icon_size);
++        let shelf: Element<_> = if is_horizontal {
++            Column::new()
++                .push(vertical_space().height(Length::Fill))
++                .push(container(horizontal_space()).width(Length::Fill).height(Length::Fixed(shelf_h)).class(mac_shelf(true, false)))
++                .width(Length::Fill)
++                .height(Length::Fill)
++                .into()
++        } else {
++            Row::new()
++                .push(container(vertical_space()).height(Length::Fill).width(Length::Fixed(shelf_h)).class(mac_shelf(true, false)))
++                .width(Length::Fill)
++                .height(Length::Fill)
++                .into()
++        };
++        let content = iced::widget::Stack::new().push(content).push_under(shelf);
 +        let content = mouse_area(content)
 +            .on_move(move |p| Message::MacHover(Some(if is_horizontal { p.x } else { p.y })))
 +            .on_exit(Message::MacHover(None));
