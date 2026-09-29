@@ -44,6 +44,7 @@ done
 stale() { [ -n "$FORCE" ] || [ "$1" != "$(cat "$D/$2" 2>/dev/null)" ]; }
 if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$AVER" cosmic-applet-notifications-built-version \
+   && ! stale "$AVER" cosmic-app-list-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-panel 2>/dev/null)" cosmic-panel-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-workspaces 2>/dev/null)" cosmic-workspaces-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-launcher 2>/dev/null)" cosmic-launcher-built-version \
@@ -131,7 +132,7 @@ if stale "$VER" built-version; then
 fi
 
 # --- Panel buttons (per-button icon/text) and Notification Center ------------
-if [ -n "$AVER" ] && { stale "$AVER" applets-built-version || stale "$AVER" cosmic-applet-notifications-built-version; }; then
+if [ -n "$AVER" ] && { stale "$AVER" applets-built-version || stale "$AVER" cosmic-applet-notifications-built-version || stale "$AVER" cosmic-app-list-built-version; }; then
     ASRC=$D/build/cosmic-applets
     AT=$HOME/.cache/cosmic-mac/target-applets
     if checkout "$ASRC" cosmic-applets "epoch-$AVER"; then
@@ -150,6 +151,14 @@ if [ -n "$AVER" ] && { stale "$AVER" applets-built-version || stale "$AVER" cosm
             echo "$AVER" > "$D/cosmic-applet-notifications-built-version"
         else
             FAILED+=("Notification Center")
+        fi
+        if apply_feature dock cosmic-app-list \
+            && CARGO_TARGET_DIR=$AT nice -n 19 cargo build --release --locked -p cosmic-app-list -Zgit=shallow-deps; then
+            install -Dm755 "$AT/release/cosmic-app-list" "$D/bin/cosmic-app-list"
+            save_feature dock cosmic-app-list
+            echo "$AVER" > "$D/cosmic-app-list-built-version"
+        else
+            FAILED+=("Dock icons (spacing + magnification)")
         fi
     else
         FAILED+=("cosmic-applets source download")

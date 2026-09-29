@@ -17,6 +17,8 @@ put $C/com.system76.CosmicComp/v1/workspaces '(
 put $C/com.system76.CosmicComp/v1/input_touchpad '(state:Enabled,click_method:Some(Clickfinger),disable_while_typing:Some(true),scroll_config:Some((method:Some(TwoFinger),natural_scroll:Some(true),scroll_button:None,scroll_factor:None)),tap_config:Some((enabled:false,button_map:Some(LeftRightMiddle),drag:true,drag_lock:false)))'
 
 # --- Dock: macOS shelf. Glass rounded rectangle; apps | minimized, Downloads, Trash ---
+# cosmic-maximize-to-workspace copies this into one dock per display ("Dock-<display>")
+# and hides a display's dock only while it shows a maximized/fullscreen window.
 D=$C/com.system76.CosmicPanel.Dock/v1
 put $D/autohide OnOverlap
 put $D/autohide_behavior '(
@@ -29,8 +31,9 @@ put $D/exclusive_zone false
 put $D/keep_style_on_maximize true
 put $D/opacity 0.55
 put $D/border_radius 24
-put $D/padding 6
-put $D/spacing 6
+put $D/size 'Custom(64)'
+put $D/padding 4
+put $D/spacing 2
 put $D/margin 8
 put $D/plugins_center 'Some([
     "com.system76.CosmicAppList",

@@ -56,3 +56,28 @@ s, n4 = re.subn(r"if self\.desktop\.icon\.is_some\(\)\n", "if (self.desktop.icon
 if n3 != 1 or n4 != 1:
     sys.exit(1)
 open(p, "w").write(s)
+
+# ---------------------------------------------------------------------------
+# macOS Dock: buttons in a bottom dock (Downloads, Trash, App Library) use the
+# same icon size, headroom and tight spacing as the patched Dock app icons.
+s = open(p).read()
+s, n5 = re.subn(
+    r"(        let symbolic = icon\.symbolic;\n)",
+    r"""\1        let dock = !symbolic && matches!(self.core.applet.anchor, PanelAnchor::Bottom);
+        let (suggested, horizontal_padding, head) = if dock {
+            let small = ((suggested.0 as f32) * 0.8).round() as u16;
+            ((small, small), ((horizontal_padding as f32) * 0.3).max(2.0) as u16, suggested.1 - small)
+        } else {
+            (suggested, horizontal_padding, 0)
+        };
+""", s, count=1)
+s, n6 = re.subn(
+    r"            \.center\(Length::Fill\),\n        \)\n        \.width\(Length::Fixed\(\(suggested\.0 \+ 2 \* horizontal_padding\) as f32\)\)\n        \.height\(Length::Fixed\(\(suggested\.1 \+ 2 \* vertical_padding\) as f32\)\)",
+    "            .padding([head as f32, 0.0, 0.0, 0.0])\n"
+    "            .center(Length::Fill),\n        )\n"
+    "        .width(Length::Fixed((suggested.0 + 2 * horizontal_padding) as f32))\n"
+    "        .height(Length::Fixed((suggested.1 + head + 2 * vertical_padding) as f32))",
+    s, count=1)
+if n5 != 1 or n6 != 1:
+    sys.exit(1)
+open(p, "w").write(s)

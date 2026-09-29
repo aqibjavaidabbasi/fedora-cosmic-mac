@@ -498,8 +498,9 @@ impl App {
         self.output_state.info(output).and_then(|i| i.name)
     }
 
-    /// Make sure every display has its own top bar ("Panel-<display>"), copied
-    /// from the "Panel" template, and that COSMIC's panel list uses them.
+    /// Make sure every display has its own top bar ("Panel-<display>") and dock
+    /// ("Dock-<display>"), copied from the "Panel"/"Dock" templates, and that
+    /// COSMIC's panel list uses them.
     fn ensure_panels(&mut self) {
         let names: Vec<String> = self.output_state.outputs().filter_map(|o| self.output_name(&o)).collect();
         if names.is_empty() {
@@ -533,6 +534,31 @@ impl App {
                 }
             }
         }
+        // Per-display docks ("Dock-<display>") from the "Dock" template, so each
+        // screen's dock can hide on its own when that screen shows a maximized window.
+        let dock_template = cosmic_dir("com.system76.CosmicPanel.Dock");
+        if let Ok(dfiles) = fs::read_dir(&dock_template) {
+            let dfiles: Vec<_> = dfiles.filter_map(|f| f.ok()).collect();
+            for name in &names {
+                let entry = format!("Dock-{name}");
+                let dir = cosmic_dir(&format!("com.system76.CosmicPanel.{entry}"));
+                let _ = fs::create_dir_all(&dir);
+                for f in &dfiles {
+                    let key = f.file_name().to_string_lossy().to_string();
+                    if matches!(key.as_str(), "output" | "name" | "autohide") {
+                        continue;
+                    }
+                    if let Ok(v) = fs::read_to_string(f.path()) {
+                        write_if_changed(&format!("{dir}/{key}"), v.trim());
+                    }
+                }
+                write_if_changed(&format!("{dir}/output"), &format!("Name(\"{name}\")"));
+                write_if_changed(&format!("{dir}/name"), &format!("\"{entry}\""));
+                if fs::metadata(format!("{dir}/autohide")).is_err() {
+                    let _ = fs::write(format!("{dir}/autohide"), "Never");
+                }
+            }
+        }
         // Panel list: per-display bars instead of the shared "Panel".
         let entries_path = format!("{}/entries", cosmic_dir("com.system76.CosmicPanel"));
         let current = fs::read_to_string(&entries_path).unwrap_or_default();
@@ -541,7 +567,7 @@ impl App {
             .skip(1)
             .step_by(2)
             .map(str::to_string)
-            .filter(|e| e != "Panel")
+            .filter(|e| e != "Panel" && e != "Dock")
             .collect();
         for name in &names {
             let entry = panel_entry(name);
@@ -549,8 +575,11 @@ impl App {
                 list.insert(0, entry);
             }
         }
-        if !list.iter().any(|e| e == "Dock") {
-            list.push("Dock".into());
+        for name in &names {
+            let entry = format!("Dock-{name}");
+            if !list.contains(&entry) {
+                list.push(entry);
+            }
         }
         let ron = format!(
             "[\n{}\n]",
@@ -582,6 +611,10 @@ impl App {
             };
             let big = self.big_window_on(&output);
             log!("{name}: showing {:?}", big.as_ref().map(|i| &i.app_id));
+            write_if_changed(
+                &panel_file(&format!("Dock-{name}"), "autohide"),
+                if big.is_some() { "Always" } else { "Never" },
+            );
             match big {
                 Some(info) => {
                     if let Some((t, title, when)) = self.last_capture.get(&name) {

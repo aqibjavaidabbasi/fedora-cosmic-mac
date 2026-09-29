@@ -27,7 +27,7 @@ index 591fbf3..a45cb85 100644
  
  #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 diff --git a/cosmic-panel-button/src/lib.rs b/cosmic-panel-button/src/lib.rs
-index fe411f8..003d50f 100644
+index fe411f8..1037f4e 100644
 --- a/cosmic-panel-button/src/lib.rs
 +++ b/cosmic-panel-button/src/lib.rs
 @@ -20,6 +20,19 @@ use std::{env, fs, process::Command, sync::LazyLock};
@@ -50,7 +50,34 @@ index fe411f8..003d50f 100644
  static AUTOSIZE_MAIN_ID: LazyLock<Id> = LazyLock::new(|| Id::new("autosize-main"));
  
  #[derive(Debug, Clone, Default)]
-@@ -94,10 +107,7 @@ impl cosmic::Application for Button {
+@@ -59,6 +72,13 @@ impl Button {
+             (applet_padding_minor_axis, major_padding)
+         };
+         let symbolic = icon.symbolic;
++        let dock = !symbolic && matches!(self.core.applet.anchor, PanelAnchor::Bottom);
++        let (suggested, horizontal_padding, head) = if dock {
++            let small = ((suggested.0 as f32) * 0.8).round() as u16;
++            ((small, small), ((horizontal_padding as f32) * 0.3).max(2.0) as u16, suggested.1 - small)
++        } else {
++            (suggested, horizontal_padding, 0)
++        };
+ 
+         cosmic::widget::button::custom(
+             cosmic::widget::layer_container(
+@@ -75,10 +95,11 @@ impl Button {
+                     .width(Length::Fixed(suggested.0 as f32))
+                     .height(Length::Fixed(suggested.1 as f32)),
+             )
++            .padding([head as f32, 0.0, 0.0, 0.0])
+             .center(Length::Fill),
+         )
+         .width(Length::Fixed((suggested.0 + 2 * horizontal_padding) as f32))
+-        .height(Length::Fixed((suggested.1 + 2 * vertical_padding) as f32))
++        .height(Length::Fixed((suggested.1 + head + 2 * vertical_padding) as f32))
+         .class(cosmic::theme::Button::AppletIcon)
+     }
+ }
+@@ -94,10 +115,7 @@ impl cosmic::Application for Button {
              .ok()
              .and_then(|c| CosmicPanelButtonConfig::get_entry(&c).ok())
              .unwrap_or_default()
@@ -62,7 +89,7 @@ index fe411f8..003d50f 100644
          (
              Self {
                  core,
-@@ -135,10 +145,7 @@ impl cosmic::Application for Button {
+@@ -135,10 +153,7 @@ impl cosmic::Application for Button {
              }
              Msg::ConfigUpdated(conf) => {
                  self.config = conf
@@ -74,7 +101,7 @@ index fe411f8..003d50f 100644
              }
              Msg::Surface(a) => {
                  return cosmic::task::message(cosmic::Action::Cosmic(
-@@ -154,7 +161,7 @@ impl cosmic::Application for Button {
+@@ -154,7 +169,7 @@ impl cosmic::Application for Button {
          // override for icon, later if text is updated to wrap, we may
          // use Override::Text to override this behavior
          autosize::autosize(
@@ -83,7 +110,7 @@ index fe411f8..003d50f 100644
                  && matches!(
                      self.core.applet.anchor,
                      PanelAnchor::Left | PanelAnchor::Right
-@@ -171,8 +178,10 @@ impl cosmic::Application for Button {
+@@ -171,8 +186,10 @@ impl cosmic::Application for Button {
                  cosmic::Element::from(
                      self.core.applet.applet_tooltip::<Msg>(
                          self.icon_button_from_handle(

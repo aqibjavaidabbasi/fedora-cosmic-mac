@@ -15,6 +15,7 @@ done <<'EOF'
 cosmic-comp built-version cosmic-comp Three-finger swipe, Mac swipe feel, Mac Spaces
 cosmic-applets applets-built-version cosmic-panel-button Top-left bar buttons
 cosmic-applets cosmic-applet-notifications-built-version cosmic-applet-notifications Notification Center
+cosmic-applets cosmic-app-list-built-version cosmic-app-list Dock icons (spacing, magnification)
 cosmic-panel cosmic-panel-built-version cosmic-panel Top bar recolor
 cosmic-workspaces cosmic-workspaces-built-version cosmic-workspaces Centered overview thumbnails
 cosmic-launcher cosmic-launcher-built-version cosmic-launcher Spotlight launcher

@@ -1,0 +1,7 @@
+Some([
+    "com.system76.CosmicAppList",
+    "com.aqib.DockSeparator",
+    "com.system76.CosmicAppletMinimize",
+    "com.aqib.DockDownloads",
+    "com.aqib.DockTrash",
+])

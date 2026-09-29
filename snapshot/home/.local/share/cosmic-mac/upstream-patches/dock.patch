@@ -1,0 +1,164 @@
+diff --git a/cosmic-app-list/src/app.rs b/cosmic-app-list/src/app.rs
+index 8db96ee..36b2e06 100755
+--- a/cosmic-app-list/src/app.rs
++++ b/cosmic-app-list/src/app.rs
+@@ -83,10 +83,33 @@ struct AppletIconData {
+ 
+ static DND_FAVORITES: u64 = u64::MAX;
+ 
++// ---- macOS Dock magnification (cosmic-mac patches/dock.py) ----
++const MAC_MAG: f32 = 1.45;
++thread_local! {
++    /// Pointer position along the Dock, in the (magnified) layout's coordinates.
++    static MAC_HOVER: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
++    /// Current scale of each dock item, by item id.
++    static MAC_SCALE: std::cell::RefCell<FxHashMap<u32, f32>> = std::cell::RefCell::new(FxHashMap::default());
++}
++
++/// Smooth bell: MAC_MAG right under the pointer, 1.0 two and a bit icons away.
++fn mac_scale_at(distance: f32, slot: f32) -> f32 {
++    let r = slot * 2.2;
++    if distance.abs() >= r {
++        1.0
++    } else {
++        1.0 + (MAC_MAG - 1.0) * (1.0 + (std::f32::consts::PI * distance / r).cos()) / 2.0
++    }
++}
++
+ impl AppletIconData {
+     fn new(applet: &Context) -> Self {
+-        let icon_size = applet.suggested_size(false).0;
++        // macOS Dock (cosmic-mac patches/dock.py): icons at 80% of the slot, the rest is
++        // headroom for hover magnification; icons close together along the Dock.
++        let full_icon = applet.suggested_size(false).0;
++        let icon_size = ((full_icon as f32) * 0.8).round() as u16;
+         let (major_padding, cross_padding) = applet.suggested_padding(false);
++        let major_padding = ((major_padding as f32) * 0.3).max(2.0) as u16;
+         let (h_padding, v_padding) = if applet.is_horizontal() {
+             (major_padding as f32, cross_padding as f32)
+         } else {
+@@ -136,6 +159,14 @@ impl AppletIconData {
+                 h_padding,
+             ],
+         };
++        let mac_head = (full_icon - icon_size) as f32;
++        let mut padding = padding;
++        match applet.anchor {
++            PanelAnchor::Bottom => padding[0] += mac_head,
++            PanelAnchor::Top => padding[2] += mac_head,
++            PanelAnchor::Left => padding[1] += mac_head,
++            PanelAnchor::Right => padding[3] += mac_head,
++        }
+         AppletIconData {
+             icon_size,
+             icon_spacing,
+@@ -209,14 +240,24 @@ impl DockItem {
+         let toplevel_count = filtered_toplevels.len();
+ 
+         let app_icon = AppletIconData::new(applet);
++        let mut app_icon = app_icon;
++        let mac_s = MAC_SCALE.with(|m| m.borrow().get(id).copied().unwrap_or(1.0));
++        let mac_grow = (app_icon.icon_size as f32 * (mac_s - 1.0)).round();
++        let mac_size = app_icon.icon_size + mac_grow as u16;
++        match applet.anchor {
++            PanelAnchor::Bottom => app_icon.padding.top = (app_icon.padding.top - mac_grow).max(0.0),
++            PanelAnchor::Top => app_icon.padding.bottom = (app_icon.padding.bottom - mac_grow).max(0.0),
++            PanelAnchor::Left => app_icon.padding.right = (app_icon.padding.right - mac_grow).max(0.0),
++            PanelAnchor::Right => app_icon.padding.left = (app_icon.padding.left - mac_grow).max(0.0),
++        }
+ 
+         let cosmic_icon = cosmic::widget::icon(
+             fde::IconSource::from_unknown(desktop_info.icon().unwrap_or_default()).as_cosmic_icon(),
+         )
+         // sets the preferred icon size variant
+         .size(128)
+-        .width(app_icon.icon_size.into())
+-        .height(app_icon.icon_size.into());
++        .width(mac_size.into())
++        .height(mac_size.into());
+ 
+         let indicator = {
+             let container = if toplevel_count <= 1 {
+@@ -390,6 +431,7 @@ pub enum PopupType {
+ #[derive(Debug, Clone)]
+ enum Message {
+     Wayland(WaylandUpdate),
++    MacHover(Option<f32>),
+     PinApp(u32),
+     UnpinApp(u32),
+     Popup(u32, window::Id),
+@@ -889,6 +931,10 @@ impl cosmic::Application for CosmicAppList {
+ 
+     fn update(&mut self, message: Self::Message) -> app::Task<Self::Message> {
+         match message {
++            Message::MacHover(pos) => {
++                MAC_HOVER.with(|h| h.set(pos));
++                return Task::none();
++            }
+             Message::Popup(id, parent_window_id) => {
+                 if let Some(Popup {
+                     parent,
+@@ -1763,6 +1809,53 @@ impl cosmic::Application for CosmicAppList {
+             PanelAnchor::Top | PanelAnchor::Bottom => true,
+             PanelAnchor::Left | PanelAnchor::Right => false,
+         };
++        {
++            // Items in dock order: pinned, then the running ones on this workspace.
++            let pad = app_icon.padding;
++            let slot = app_icon.icon_size as f32
++                + if is_horizontal { pad.left + pad.right } else { pad.top + pad.bottom }
++                + app_icon.icon_spacing;
++            let active_ids: Vec<u32> = self
++                .active_list
++                .iter()
++                .filter(|d| d.toplevels.iter().any(|(t, _)| self.is_on_current_monitor_and_workspace(t)))
++                .map(|d| d.id)
++                .collect();
++            let pinned_ids: Vec<u32> = self.pinned_list.iter().map(|d| d.id).collect();
++            let gap = if !pinned_ids.is_empty() && !active_ids.is_empty() { 9.0 } else { 0.0 };
++            let old = MAC_SCALE.with(|m| m.borrow().clone());
++            let mut map = FxHashMap::default();
++            if let Some(pointer) = MAC_HOVER.with(|h| h.get()) {
++                // Map the pointer back into un-magnified coordinates using the widths
++                // currently on screen, so growing icons don't move the target.
++                let mut at = 0.0f32;
++                let mut base = 0.0f32;
++                let mut base_x = None;
++                for (k, id) in pinned_ids.iter().chain(active_ids.iter()).enumerate() {
++                    if k == pinned_ids.len() {
++                        at += gap;
++                        base += gap;
++                    }
++                    let w = slot + app_icon.icon_size as f32 * (old.get(id).copied().unwrap_or(1.0) - 1.0);
++                    if pointer < at + w {
++                        base_x = Some(base + (pointer - at).max(0.0) / w * slot);
++                        break;
++                    }
++                    at += w;
++                    base += slot;
++                }
++                let base_x = base_x.unwrap_or(base);
++                let mut c = 0.0f32;
++                for (k, id) in pinned_ids.iter().chain(active_ids.iter()).enumerate() {
++                    if k == pinned_ids.len() {
++                        c += gap;
++                    }
++                    map.insert(*id, mac_scale_at(base_x - (c + slot / 2.0), slot));
++                    c += slot;
++                }
++            }
++            MAC_SCALE.with(|m| *m.borrow_mut() = map);
++        }
+         let divider_padding = match self.core.applet.size {
+             Size::Hardcoded(_) => 4,
+             Size::PanelSize(ref s) => {
+@@ -2074,6 +2167,9 @@ impl cosmic::Application for CosmicAppList {
+             }
+         }
+ 
++        let content = mouse_area(content)
++            .on_move(move |p| Message::MacHover(Some(if is_horizontal { p.x } else { p.y })))
++            .on_exit(Message::MacHover(None));
+         self.core
+             .applet
+             .autosize_window(content)
