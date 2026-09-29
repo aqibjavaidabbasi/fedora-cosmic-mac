@@ -49,7 +49,7 @@ What `update.sh` does:
 
 1. Saves the current setup to git and pushes it, so there is a restore point.
 2. Runs `sudo dnf upgrade --refresh` and `flatpak update`.
-3. Rebuilds every customization for the new COSMIC version.
+3. Rebuilds every customization for the new COSMIC version. Your settings are not touched.
 4. Saves the refreshed setup to git again.
 5. Shows the status. Log out and back in afterwards.
 
@@ -88,7 +88,8 @@ Update the matching `patches/*.py` so it fits again, then run `~/.local/share/co
 
 ## Changing the setup
 
-- **Mac settings** (dock, top bar applets, theme, icons, shortcuts): edit `~/.local/share/cosmic-mac/apply-settings.sh` and run it. Every rebuild re-applies this file, so a change made only in COSMIC Settings for these items gets reset unless you also make it here.
+- **Your own tweaks:** change anything in COSMIC Settings as usual. Updates and rebuilds never touch your settings, so your changes are kept.
+- **Resetting the Mac look:** run `~/.local/share/cosmic-mac/apply-settings.sh` to apply the Mac defaults again (dock, top bar applets, glass theme, icons, shortcuts). You can edit the file first to change those defaults.
 - **Swipe feel:** edit `~/.config/cosmic-mac/animation.conf`, then log out and back in.
 
 Save any change to GitHub:

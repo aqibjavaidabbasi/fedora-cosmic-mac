@@ -1,7 +1,7 @@
 #!/bin/bash
 # Rebuilds the patched COSMIC components (compositor, panel buttons, Notification
 # Center, top bar, overview) for whatever COSMIC version Fedora has installed,
-# plus the helper apps, then re-applies settings.
+# plus the helper apps. It never touches your settings.
 # Run by the daily timer and by the launchers when versions differ.
 # Use --force to rebuild everything even if versions already match.
 #
@@ -187,7 +187,9 @@ build_app() {
 build_app control-center cosmic-mac-control-center
 build_app battery cosmic-mac-battery
 
-"$D/apply-settings.sh"
+# Settings are NOT re-applied here, so anything changed in COSMIC Settings survives
+# updates. Only the per-display top bars are refreshed from their template.
+"$D/panel-contrast.py" >/dev/null 2>&1 || true
 
 if [ ${#FAILED[@]} -eq 0 ]; then
     echo "$REL" > "$D/os-built-version"

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Re-applies all macOS-like COSMIC customizations. Safe to run any time.
-# Runs automatically after COSMIC is updated and rebuilt (see rebuild.sh).
-# Edit the values here if you change something in COSMIC Settings and want it kept.
+# Run by install.sh, and by you after editing it. Rebuilds after updates do NOT run it,
+# so changes you make in COSMIC Settings are kept.
 
 C=~/.config/cosmic
 put() { mkdir -p "$(dirname "$1")"; printf '%s' "$2" > "$1"; }

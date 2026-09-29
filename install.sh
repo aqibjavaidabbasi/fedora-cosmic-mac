@@ -61,13 +61,15 @@ cp "$S"/.local/share/applications/com.aqib.*.desktop ~/.local/share/applications
 cp "$S"/.config/systemd/user/cosmic-mac-* ~/.config/systemd/user/
 [ -f ~/.config/cosmic-mac/animation.conf ] || cp "$S/.config/cosmic-mac/animation.conf" ~/.config/cosmic-mac/
 
+step "Building the patched COSMIC parts and helper apps (takes a while)"
+"$D/rebuild.sh" --force || echo "Some parts failed to build; see $D/rebuild.log. Everything else is installed."
+
+step "Applying the Mac settings"
+"$D/apply-settings.sh"
 if [ -n "$RESTORE" ]; then
     step "Restoring all saved COSMIC settings"
     rsync -a "$S/.config/cosmic/" ~/.config/cosmic/
 fi
-
-step "Building the patched COSMIC parts and helper apps (takes a while)"
-"$D/rebuild.sh" --force || echo "Some parts failed to build; see $D/rebuild.log. Everything else is installed."
 
 step "Enabling automatic rebuilds after COSMIC updates"
 systemctl --user daemon-reload
