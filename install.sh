@@ -58,6 +58,8 @@ rsync -a --exclude '*built-version' --exclude rebuild.log --exclude .lock \
     "$S/.local/share/cosmic-mac/" "$D/"
 for f in "$S"/.local/bin/cosmic-*; do install -m755 "$f" ~/.local/bin/; done
 cp "$S"/.local/share/applications/com.aqib.*.desktop ~/.local/share/applications/
+mkdir -p ~/.local/share/icons/hicolor/symbolic/apps
+cp "$D"/*/data/icons/*.svg ~/.local/share/icons/hicolor/symbolic/apps/ 2>/dev/null || true
 cp "$S"/.config/systemd/user/cosmic-mac-* ~/.config/systemd/user/
 [ -f ~/.config/cosmic-mac/animation.conf ] || cp "$S/.config/cosmic-mac/animation.conf" ~/.config/cosmic-mac/
 

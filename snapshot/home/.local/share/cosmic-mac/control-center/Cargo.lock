@@ -972,6 +972,7 @@ dependencies = [
 name = "cosmic-mac-control-center"
 version = "0.1.0"
 dependencies = [
+ "image",
  "libcosmic",
  "tokio",
 ]

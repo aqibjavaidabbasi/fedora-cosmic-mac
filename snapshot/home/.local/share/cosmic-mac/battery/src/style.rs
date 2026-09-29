@@ -2,6 +2,8 @@
 //! round badges. Colors derive from the active COSMIC theme so light/dark both work.
 //! Shared by the cosmic-mac applets (the same file is copied into each crate).
 
+#![allow(dead_code)]
+
 use std::sync::LazyLock;
 
 use cosmic::{
@@ -134,4 +136,13 @@ pub fn separator<'a, M: 'a>() -> Element<'a, M> {
 pub fn open_requested(app_id: &str) -> bool {
     let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") else { return false };
     std::fs::remove_file(format!("{dir}/cosmic-mac/open/{app_id}")).is_ok()
+}
+
+/// Small grey caption (11px), e.g. the subtitle under a Control Center tile.
+pub fn secondary_small<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
+    text::caption(s.into())
+        .size(11)
+        .wrapping(cosmic::iced::core::widget::text::Wrapping::None)
+        .class(theme::Text::Custom(dim_text))
+        .into()
 }
