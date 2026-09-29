@@ -31,7 +31,7 @@ io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager	0.1.0	cosmic
 io.github.cosmic_utils.minimon-applet	1.2.0	cosmic
 io.github.marcelogomes90.cosmic-ext-applet-status-hub	1.5.12	cosmic
 
-# Third-party themes in ~/.local/share/icons (not stored here, reinstall from upstream)
+# Third-party themes in ~/.local/share/icons (not stored here; install.sh downloads them)
 MacTahoe, MacTahoe-dark, MacTahoe-light  https://github.com/vinceliuice/MacTahoe-icon-theme
 WhiteSur, WhiteSur-dark, WhiteSur-light   https://github.com/vinceliuice/WhiteSur-icon-theme
 WhiteSur-cursors                         https://github.com/vinceliuice/WhiteSur-cursors

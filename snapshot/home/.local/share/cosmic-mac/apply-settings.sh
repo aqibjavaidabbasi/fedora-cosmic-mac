@@ -131,6 +131,21 @@ fi
 EOF
 fi
 
+# --- Patched COSMIC parts: ~/.local/bin must come first in the session PATH ---
+# The launchers in ~/.local/bin replace cosmic-comp, cosmic-panel, etc. COSMIC's
+# session reads the login shell profile, so make sure it puts them first.
+case "$(basename "${SHELL:-bash}")" in
+    zsh) PROFILE=~/.zprofile ;;
+    *)   PROFILE=~/.bash_profile ;;
+esac
+if ! grep -q "COSMIC Mac: patched components first" "$PROFILE" 2>/dev/null; then
+    cat >> "$PROFILE" <<'EOF'
+
+# COSMIC Mac: patched components first (launchers in ~/.local/bin)
+case "$PATH" in "$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+EOF
+fi
+
 # --- Maximized apps get their own workspace (autostart, COSMIC only) -------
 put ~/.config/autostart/cosmic-maximize-to-workspace.desktop "[Desktop Entry]
 Type=Application

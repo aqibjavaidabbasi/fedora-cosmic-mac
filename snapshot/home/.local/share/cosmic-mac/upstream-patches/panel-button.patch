@@ -1,0 +1,48 @@
+diff --git a/cosmic-panel-button/src/lib.rs b/cosmic-panel-button/src/lib.rs
+index fe411f8..6101a90 100644
+--- a/cosmic-panel-button/src/lib.rs
++++ b/cosmic-panel-button/src/lib.rs
+@@ -20,6 +20,19 @@ use std::{env, fs, process::Command, sync::LazyLock};
+ 
+ mod config;
+ 
++impl CosmicPanelButtonConfig {
++    /// Per-button override: "<panel>/<desktop-id>", then "*/<desktop-id>", then "<panel>".
++    fn pick(&self, panel: &str) -> IndividualConfig {
++        let id = std::env::args().nth(1).unwrap_or_default();
++        self.configs
++            .get(&format!("{panel}/{id}"))
++            .or_else(|| self.configs.get(&format!("*/{id}")))
++            .or_else(|| self.configs.get(panel))
++            .cloned()
++            .unwrap_or_default()
++    }
++}
++
+ static AUTOSIZE_MAIN_ID: LazyLock<Id> = LazyLock::new(|| Id::new("autosize-main"));
+ 
+ #[derive(Debug, Clone, Default)]
+@@ -94,10 +107,7 @@ impl cosmic::Application for Button {
+             .ok()
+             .and_then(|c| CosmicPanelButtonConfig::get_entry(&c).ok())
+             .unwrap_or_default()
+-            .configs
+-            .get(&core.applet.panel_type.to_string())
+-            .cloned()
+-            .unwrap_or_default();
++            .pick(&core.applet.panel_type.to_string());
+         (
+             Self {
+                 core,
+@@ -135,10 +145,7 @@ impl cosmic::Application for Button {
+             }
+             Msg::ConfigUpdated(conf) => {
+                 self.config = conf
+-                    .configs
+-                    .get(&self.core.applet.panel_type.to_string())
+-                    .cloned()
+-                    .unwrap_or_default();
++                    .pick(&self.core.applet.panel_type.to_string());
+             }
+             Msg::Surface(a) => {
+                 return cosmic::task::message(cosmic::Action::Cosmic(

@@ -15,3 +15,6 @@ export PATH="/home/aqibj/.local/bin:$PATH"
 if [ "$XDG_CURRENT_DESKTOP" = "COSMIC" ]; then
     export XCURSOR_THEME=WhiteSur-cursors XCURSOR_SIZE=24
 fi
+
+# COSMIC Mac: patched components first (launchers in ~/.local/bin)
+case "$PATH" in "$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
