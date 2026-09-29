@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Battery (Mac)
+Comment=Battery percentage, Low Power Mode and power source
+Type=Application
+Exec=cosmic-mac-battery
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Battery;Power;
+Icon=battery-good-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=End
+X-OverflowPriority=10

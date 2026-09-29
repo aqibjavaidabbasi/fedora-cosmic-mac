@@ -1,0 +1,235 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index f686e91..d9f25e1 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1146,6 +1146,7 @@ dependencies = [
+  "futures-util",
+  "i18n-embed",
+  "i18n-embed-fl",
++ "jiff",
+  "libcosmic",
+  "rust-embed",
+  "tokio",
+diff --git a/cosmic-applet-notifications/Cargo.toml b/cosmic-applet-notifications/Cargo.toml
+index 2e472b2..67194d2 100644
+--- a/cosmic-applet-notifications/Cargo.toml
++++ b/cosmic-applet-notifications/Cargo.toml
+@@ -25,3 +25,4 @@ i18n-embed-fl.workspace = true
+ rust-embed.workspace = true
+ zbus = { workspace = true, features = ["tokio", "p2p"] }
+ url = "2.5.8"
++jiff = "0.2"
+diff --git a/cosmic-applet-notifications/src/lib.rs b/cosmic-applet-notifications/src/lib.rs
+index 720f8d6..671c8ff 100644
+--- a/cosmic-applet-notifications/src/lib.rs
++++ b/cosmic-applet-notifications/src/lib.rs
+@@ -49,9 +49,50 @@ struct Notifications {
+     token_tx: Option<calloop::channel::Sender<TokenRequest>>,
+     proxy: NotificationsAppletProxy<'static>,
+     notifications_tx: Option<Sender<notifications::Input>>,
++    now: jiff::Zoned,
++    cal_month: jiff::civil::Date,
++    military_time: bool,
+ }
+ 
+ impl Notifications {
++    fn mac_calendar(&self) -> Element<'_, Message> {
++        let first = self.cal_month;
++        let today = self.now.date();
++        let header = row![
++            text::heading(first.strftime("%B %Y").to_string()).width(Length::Fill),
++            button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::MacCalPrev),
++            button::icon(icon::from_name("go-next-symbolic")).on_press(Message::MacCalNext),
++        ]
++        .align_y(Alignment::Center);
++        let mut grid = cosmic::widget::grid().width(Length::Fill);
++        for d in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] {
++            grid = grid.push(container(text::caption(d)).center_x(Length::Fixed(36.0)));
++        }
++        grid = grid.insert_row();
++        let offset = first.weekday().to_monday_zero_offset() as i64;
++        let start = first.checked_sub(jiff::Span::new().days(offset)).unwrap_or(first);
++        for i in 0..42i64 {
++            if i > 0 && i % 7 == 0 {
++                grid = grid.insert_row();
++            }
++            let Ok(day) = start.checked_add(jiff::Span::new().days(i)) else { continue };
++            let in_month = day.month() == first.month();
++            let label = if in_month { day.day().to_string() } else { String::new() };
++            let class = if day == today && in_month {
++                cosmic::widget::button::ButtonClass::Suggested
++            } else {
++                cosmic::widget::button::ButtonClass::Text
++            };
++            grid = grid.push(
++                button::custom(container(text::body(label)).center(Length::Fill))
++                    .class(class)
++                    .width(Length::Fixed(36.0))
++                    .height(Length::Fixed(32.0)),
++            );
++        }
++        Column::new().spacing(8).push(header).push(grid).into()
++    }
++
+     fn update_icon(&mut self) {
+         self.icon_name = if self.config.do_not_disturb {
+             "cosmic-applet-notification-disabled-symbolic"
+@@ -67,6 +108,9 @@ impl Notifications {
+ #[derive(Debug, Clone)]
+ enum Message {
+     TogglePopup,
++    MacTick,
++    MacCalPrev,
++    MacCalNext,
+     CloseRequested(window::Id),
+     DoNotDisturb(bool),
+     NotificationEvent(notifications::Output),
+@@ -117,6 +161,13 @@ impl cosmic::Application for Notifications {
+             proxy: block_on(crate::subscriptions::notifications::get_proxy())
+                 .expect("Failed to get proxy"),
+             notifications_tx: None,
++            now: jiff::Zoned::now(),
++            cal_month: jiff::Zoned::now().date().first_of_month(),
++            military_time: std::fs::read_to_string(format!(
++                "{}/.config/cosmic/com.system76.CosmicAppletTime/v1/military_time",
++                std::env::var("HOME").unwrap_or_default()
++            ))
++            .is_ok_and(|v| v.trim() == "true"),
+         };
+         _self.update_icon();
+         (_self, Task::none())
+@@ -148,12 +199,29 @@ impl cosmic::Application for Notifications {
+             subscriptions::notifications::notifications(self.proxy.clone())
+                 .map(Message::NotificationEvent),
+             activation_token_subscription(0).map(Message::Token),
++            cosmic::iced::time::every(std::time::Duration::from_secs(2)).map(|_| Message::MacTick),
+         ])
+     }
+ 
+     fn update(&mut self, message: Self::Message) -> app::Task<Self::Message> {
+         match message {
++            Message::MacTick => {
++                let now = jiff::Zoned::now();
++                if now.strftime("%Y%m%d%H%M").to_string() != self.now.strftime("%Y%m%d%H%M").to_string() {
++                    self.now = now;
++                }
++                return Task::none();
++            }
++            Message::MacCalPrev => {
++                self.cal_month = self.cal_month.checked_sub(jiff::Span::new().months(1)).unwrap_or(self.cal_month);
++                return Task::none();
++            }
++            Message::MacCalNext => {
++                self.cal_month = self.cal_month.checked_add(jiff::Span::new().months(1)).unwrap_or(self.cal_month);
++                return Task::none();
++            }
+             Message::TogglePopup => {
++                self.cal_month = self.now.date().first_of_month();
+                 if let Some(p) = self.popup.take() {
+                     return destroy_popup(p);
+                 } else {
+@@ -377,11 +445,28 @@ impl cosmic::Application for Notifications {
+     }
+ 
+     fn view(&self) -> Element<'_, Message> {
+-        self.core
+-            .applet
+-            .icon_button(&self.icon_name)
++        let time = if self.military_time { "%H:%M" } else { "%-I:%M %p" };
++        let label = self.now.strftime(&format!("%a %b %-d  {time}")).to_string();
++        let mark = if self.config.do_not_disturb {
++            "  ☾"
++        } else if !self.cards.is_empty() {
++            "  •"
++        } else {
++            ""
++        };
++        let content = row![
++            self.core.applet.text(format!("{label}{mark}")),
++            container(space::vertical().height(Length::Fixed(
++                (self.core.applet.suggested_size(true).1
++                    + 2 * self.core.applet.suggested_padding(true).1) as f32
++            )))
++        ]
++        .align_y(Alignment::Center);
++        let button = button::custom(content)
++            .padding([0, self.core.applet.suggested_padding(true).0])
+             .on_press_down(Message::TogglePopup)
+-            .into()
++            .class(cosmic::theme::Button::AppletIcon);
++        cosmic::widget::autosize::autosize(button, MAC_AUTOSIZE_ID.clone()).into()
+     }
+ 
+     fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
+@@ -532,7 +617,12 @@ impl cosmic::Application for Notifications {
+             notifications,
+         ];
+ 
+-        let content = column![do_not_disturb, main_content]
++        let content = column![
++            padded_control(self.mac_calendar()),
++            padded_control(divider::horizontal::default()).padding([space_xxs, space_s]),
++            do_not_disturb,
++            main_content
++        ]
+             .align_x(Alignment::Start)
+             .padding([8, 0]);
+ 
+@@ -544,6 +634,9 @@ impl cosmic::Application for Notifications {
+     }
+ }
+ 
++static MAC_AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
++    LazyLock::new(|| cosmic::widget::Id::new("mac-clock-autosize"));
++
+ fn text_icon(name: &str, size: u16) -> cosmic::widget::Icon {
+     icon::from_name(name).size(size).symbolic(true).icon()
+ }
+diff --git a/cosmic-panel-button/src/lib.rs b/cosmic-panel-button/src/lib.rs
+index fe411f8..6101a90 100644
+--- a/cosmic-panel-button/src/lib.rs
++++ b/cosmic-panel-button/src/lib.rs
+@@ -20,6 +20,19 @@ use std::{env, fs, process::Command, sync::LazyLock};
+ 
+ mod config;
+ 
++impl CosmicPanelButtonConfig {
++    /// Per-button override: "<panel>/<desktop-id>", then "*/<desktop-id>", then "<panel>".
++    fn pick(&self, panel: &str) -> IndividualConfig {
++        let id = std::env::args().nth(1).unwrap_or_default();
++        self.configs
++            .get(&format!("{panel}/{id}"))
++            .or_else(|| self.configs.get(&format!("*/{id}")))
++            .or_else(|| self.configs.get(panel))
++            .cloned()
++            .unwrap_or_default()
++    }
++}
++
+ static AUTOSIZE_MAIN_ID: LazyLock<Id> = LazyLock::new(|| Id::new("autosize-main"));
+ 
+ #[derive(Debug, Clone, Default)]
+@@ -94,10 +107,7 @@ impl cosmic::Application for Button {
+             .ok()
+             .and_then(|c| CosmicPanelButtonConfig::get_entry(&c).ok())
+             .unwrap_or_default()
+-            .configs
+-            .get(&core.applet.panel_type.to_string())
+-            .cloned()
+-            .unwrap_or_default();
++            .pick(&core.applet.panel_type.to_string());
+         (
+             Self {
+                 core,
+@@ -135,10 +145,7 @@ impl cosmic::Application for Button {
+             }
+             Msg::ConfigUpdated(conf) => {
+                 self.config = conf
+-                    .configs
+-                    .get(&self.core.applet.panel_type.to_string())
+-                    .cloned()
+-                    .unwrap_or_default();
++                    .pick(&self.core.applet.panel_type.to_string());
+             }
+             Msg::Surface(a) => {
+                 return cosmic::task::message(cosmic::Action::Cosmic(

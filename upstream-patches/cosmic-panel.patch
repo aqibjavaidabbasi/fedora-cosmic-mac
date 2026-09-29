@@ -1,0 +1,28 @@
+diff --git a/cosmic-panel-bin/src/space_container/space_container.rs b/cosmic-panel-bin/src/space_container/space_container.rs
+index cdfdd05..75fa3d3 100644
+--- a/cosmic-panel-bin/src/space_container/space_container.rs
++++ b/cosmic-panel-bin/src/space_container/space_container.rs
+@@ -344,7 +344,7 @@ impl SpaceContainer {
+             || (c.name == entry.name
+                 && (c.is_horizontal() != entry.is_horizontal()
+                 || c.size != entry.size
+-                || c.background != entry.background
++                || panel_bg_family(&c.background) != panel_bg_family(&entry.background)
+                 || c.plugins_center != entry.plugins_center
+                 || c.plugins_wings != entry.plugins_wings))
+             // Priority change to conflict with adjacent panel
+@@ -642,3 +642,14 @@ impl SpaceContainer {
+         }
+     }
+ }
++
++/// Background changes within the same family can be applied without
++/// restarting applets: custom colors and the theme default share the
++/// theme's text color; Dark and Light each need their own.
++fn panel_bg_family(b: &CosmicPanelBackground) -> u8 {
++    match b {
++        CosmicPanelBackground::Dark => 1,
++        CosmicPanelBackground::Light => 2,
++        _ => 0,
++    }
++}

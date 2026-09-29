@@ -1,0 +1,12 @@
+[Icon Theme]
+Name=MacTahoe-COSMIC
+Comment=MacTahoe icons plus Mac-style icons for COSMIC's own apps
+Inherits=MacTahoe,hicolor
+Directories=apps/scalable
+
+[apps/scalable]
+Size=128
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Applications

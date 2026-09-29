@@ -1,0 +1,4 @@
+cosmic-applets epoch-1.8.0
+cosmic-comp epoch-1.8.0
+cosmic-panel epoch-1.8.0
+cosmic-workspaces epoch-1.8.0

@@ -1,0 +1,19 @@
+diff --git a/src/view/mod.rs b/src/view/mod.rs
+index ae2b727..53bd1cf 100644
+--- a/src/view/mod.rs
++++ b/src/view/mod.rs
+@@ -490,6 +490,14 @@ fn workspaces_sidebar<'a>(
+     };
+     let sidebar_entries_container =
+         widget::container(crate::widgets::workspace_bar(sidebar_entries, axis)).padding(8.0);
++    let sidebar_entries_container = match layout {
++        WorkspaceLayout::Horizontal => sidebar_entries_container
++            .width(Length::Fill)
++            .align_x(cosmic::iced::Alignment::Center),
++        WorkspaceLayout::Vertical => sidebar_entries_container
++            .height(Length::Fill)
++            .align_y(cosmic::iced::Alignment::Center),
++    };
+ 
+     widget::container(
+         rectangle_track.container(

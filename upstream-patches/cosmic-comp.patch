@@ -1,0 +1,218 @@
+diff --git a/src/input/actions.rs b/src/input/actions.rs
+index 8639ba6..769fb8a 100644
+--- a/src/input/actions.rs
++++ b/src/input/actions.rs
+@@ -141,6 +141,11 @@ impl State {
+                     &mut self.common.workspace_state.update(),
+                 );
+             }
++            SwipeAction::Overview => {
++                if let Some(command) = self.common.config.system_actions.get(&shortcuts::action::System::WorkspaceOverview) {
++                    self.spawn_command(command.clone());
++                }
++            }
+         }
+     }
+ 
+diff --git a/src/input/gestures/mod.rs b/src/input/gestures/mod.rs
+index 6c9c2f3..6113887 100644
+--- a/src/input/gestures/mod.rs
++++ b/src/input/gestures/mod.rs
+@@ -16,6 +16,7 @@ pub struct SwipeEvent {
+ pub enum SwipeAction {
+     NextWorkspace,
+     PrevWorkspace,
++    Overview,
+ }
+ 
+ #[derive(Debug, Clone)]
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index 45586b0..8bcc0eb 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -1193,8 +1193,7 @@ impl State {
+                                 natural_scroll = natural;
+                             }
+                             activate_action = match gesture_state.fingers {
+-                                3 => None, // TODO: 3 finger gestures
+-                                4 => {
++                                3 | 4 => {
+                                     if self.common.config.cosmic_conf.workspaces.workspace_layout
+                                         == WorkspaceLayout::Horizontal
+                                     {
+@@ -1213,6 +1212,7 @@ impl State {
+                                                     Some(SwipeAction::NextWorkspace)
+                                                 }
+                                             }
++                                            Some(Direction::Up) => Some(SwipeAction::Overview),
+                                             _ => None, // TODO: Other actions
+                                         }
+                                     } else {
+diff --git a/src/shell/mod.rs b/src/shell/mod.rs
+index 47d7885..bc421a6 100644
+--- a/src/shell/mod.rs
++++ b/src/shell/mod.rs
+@@ -122,7 +122,19 @@ use self::{
+ };
+ 
+ const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+-const GESTURE_MAX_LENGTH: f64 = 150.0;
++fn mac_env(name: &str, default: f64) -> f64 {
++    std::env::var(name).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
++}
++static GESTURE_MAX_LENGTH_CFG: std::sync::LazyLock<f64> =
++    std::sync::LazyLock::new(|| mac_env("COSMIC_MAC_SWIPE_LENGTH", 150.0).max(10.0));
++static SPRING_STIFFNESS_CFG: std::sync::LazyLock<f64> =
++    std::sync::LazyLock::new(|| mac_env("COSMIC_MAC_SPRING_STIFFNESS", 1000.0).max(10.0));
++static SPRING_DAMPING_CFG: std::sync::LazyLock<f64> =
++    std::sync::LazyLock::new(|| mac_env("COSMIC_MAC_SPRING_DAMPING", 1.0).max(0.1));
++static MAC_SPACES: std::sync::LazyLock<bool> =
++    std::sync::LazyLock::new(|| std::env::var("COSMIC_MAC_SPACES").is_ok_and(|v| v.trim() == "1"));
++static MAC_RECENT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<WorkspaceHandle, Instant>>> =
++    std::sync::LazyLock::new(Default::default);
+ const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
+ const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
+ const MOVE_GRAB_Y_OFFSET: f64 = 16.;
+@@ -338,7 +350,7 @@ impl WorkspaceDelta {
+     }
+ 
+     pub fn new_gesture_end(delta: f64, velocity: f64, forward: bool) -> Self {
+-        let params: SpringParams = SpringParams::new(1.0, 1000.0, 0.0001);
++        let params: SpringParams = SpringParams::new(*SPRING_DAMPING_CFG, *SPRING_STIFFNESS_CFG, 0.0001);
+         WorkspaceDelta::GestureEnd {
+             start: Instant::now(),
+             forward,
+@@ -570,7 +582,7 @@ impl WorkspaceSet {
+     }
+ 
+     fn update_workspace_delta(&mut self, delta: f64, forward: bool) {
+-        let easing = delta.clamp(0.0, GESTURE_MAX_LENGTH).abs() / GESTURE_MAX_LENGTH;
++        let easing = delta.clamp(0.0, *GESTURE_MAX_LENGTH_CFG).abs() / *GESTURE_MAX_LENGTH_CFG;
+         if let Some((idx, _)) = self.previously_active {
+             self.previously_active = Some((
+                 idx,
+@@ -644,6 +656,10 @@ impl WorkspaceSet {
+         state: &mut WorkspaceUpdateGuard<State>,
+         xdg_activation_state: &XdgActivationState,
+     ) {
++        if *MAC_SPACES {
++            self.mac_prune(state, xdg_activation_state);
++            return;
++        }
+         // add empty at the end, if necessary
+         if self
+             .workspaces
+@@ -693,6 +709,47 @@ impl WorkspaceSet {
+         }
+     }
+ 
++    fn mac_prune(
++        &mut self,
++        state: &mut WorkspaceUpdateGuard<State>,
++        xdg_activation_state: &XdgActivationState,
++    ) {
++        if self.workspaces.is_empty() {
++            self.add_empty_workspace(state);
++            return;
++        }
++        let now = Instant::now();
++        let recent = MAC_RECENT.lock().unwrap().clone();
++        let kept: Vec<bool> = self
++            .workspaces
++            .iter()
++            .enumerate()
++            .map(|(i, workspace)| {
++                let fresh = recent
++                    .get(&workspace.handle)
++                    .is_some_and(|t| now.duration_since(*t) < Duration::from_secs(3));
++                let keep = i == 0
++                    || i == self.active
++                    || fresh
++                    || !workspace.can_auto_remove(xdg_activation_state);
++                if !keep {
++                    state.remove_workspace(workspace.handle);
++                }
++                keep
++            })
++            .collect();
++        let mut iter = kept.iter();
++        self.workspaces.retain(|_| *iter.next().unwrap());
++        self.active -= kept
++            .iter()
++            .take(self.active + 1)
++            .filter(|kept| !**kept)
++            .count();
++        if kept.iter().any(|val| !(*val)) {
++            self.update_workspace_idxs(state);
++        }
++    }
++
+     fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
+         for (i, workspace) in self.workspaces.iter().enumerate() {
+             workspace_set_idx(
+@@ -1800,6 +1857,21 @@ impl Shell {
+         }
+     }
+ 
++    /// Handle a client's ext-workspace create request: add an empty workspace
++    /// at the end of that display's list.
++    pub fn mac_create_workspace(
++        &mut self,
++        group: &WorkspaceGroupHandle,
++        state: &mut WorkspaceUpdateGuard<'_, State>,
++    ) {
++        if let Some(set) = self.workspaces.sets.values_mut().find(|s| &s.group == group) {
++            set.add_empty_workspace(state);
++            if let Some(w) = set.workspaces.last() {
++                MAC_RECENT.lock().unwrap().insert(w.handle, Instant::now());
++            }
++        }
++    }
++
+     pub fn end_workspace_swipe(
+         &mut self,
+         output: &Output,
+@@ -3434,13 +3506,24 @@ impl Shell {
+                     self.theme.clone(),
+                     self.appearance_conf,
+                 ));
+-                let position = match window_state {
+-                    WorkspaceRestoreData::Floating(data) => Some(
+-                        data.position_relative(to_workspace.output.geometry().size.as_logical()),
++                let (position, was_maximized) = match &window_state {
++                    WorkspaceRestoreData::Floating(data) => (
++                        Some(data.position_relative(to_workspace.output.geometry().size.as_logical())),
++                        data.was_maximized,
+                     ),
+-                    _ => None,
++                    _ => (None, false),
+                 };
+                 to_workspace.floating_layer.map(mapped.clone(), position);
++                if was_maximized {
++                    if let Some(geometry) = to_workspace.floating_layer.element_geometry(&mapped) {
++                        *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
++                            original_geometry: geometry,
++                            original_layer: ManagedLayer::Floating,
++                            original_snapped: None,
++                        });
++                        to_workspace.floating_layer.map_maximized(mapped.clone(), geometry, false);
++                    }
++                }
+                 mapped.into()
+             } else if !matches!(window_state, WorkspaceRestoreData::Fullscreen(_))
+                 && to_workspace.tiling_enabled
+diff --git a/src/wayland/handlers/workspace.rs b/src/wayland/handlers/workspace.rs
+index fc5c835..e98caca 100644
+--- a/src/wayland/handlers/workspace.rs
++++ b/src/wayland/handlers/workspace.rs
+@@ -52,6 +52,10 @@ impl WorkspaceHandler for State {
+                         );
+                     }
+                 }
++                Request::Create { in_group, .. } => {
++                    let mut shell = self.common.shell.write();
++                    shell.mac_create_workspace(&in_group, &mut self.common.workspace_state.update());
++                }
+                 Request::SetPin { workspace, pinned } => {
+                     let mut shell = self.common.shell.write();
+                     if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
