@@ -6,7 +6,8 @@ Exits 1 if the code no longer matches.
   with four round buttons beside it (Apps, Files, Shortcuts, Settings).
 - Nothing below the pill until you type; then a rounded results panel with
   app icon, bold name, grey subtitle and a highlighted selection.
-- The window switcher (Alt+Tab) keeps working and uses the same row style.
+- The window switcher (Alt+Tab) looks like macOS Command-Tab: a row of big app
+  icons in a rounded panel, the selected one highlighted with its name below.
 """
 import re, sys
 
@@ -22,7 +23,7 @@ def sub(pat, rep, flags=0):
 
 # wider surface for the pill + round buttons
 sub(r"(size_limits: Limits::NONE\.min_width\(1\.0\)\.min_height\(1\.0\)\.max_width\()600\.0(\),\n\s*exclusive_zone: -1,)",
-    r"\g<1>900.0\2")
+    r"\g<1>1600.0\2")
 
 # new message for the round buttons
 sub(r"(pub enum Message \{\n    InputChanged\(String\),)", r"\1\n    MacOpen(&'static str),")
@@ -189,12 +190,67 @@ VIEW = r'''            // ---- macOS Spotlight (cosmic-mac patches/launcher.py) 
                     .align_y(Alignment::Center),
                 );
             }
-            if let Some(r) = results {
+            if self.alt_tab {
+                // macOS Command-Tab: one row of big icons, the selected one highlighted
+                // with its name underneath.
+                let mut strip = cosmic::widget::Row::new().spacing(6).align_y(Alignment::Start);
+                for (i, item) in self.launcher_items.iter().enumerate() {
+                    let selected = i == self.focused;
+                    let glyph: Element<'_, Message> = match self.launcher_item_icon_handles.get(i) {
+                        Some(Some(h)) => icon(h.clone()).width(Length::Fixed(72.0)).height(Length::Fixed(72.0)).into(),
+                        _ => icon::from_name("application-x-executable").size(72).into(),
+                    };
+                    let app_name = if item.window.is_some() { &item.description } else { &item.name };
+                    let label = text::caption(if selected { app_name.lines().next().unwrap_or_default().to_string() } else { String::new() })
+                        .size(12)
+                        .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
+                    let tile = cosmic::widget::button::custom(
+                        container(glyph).padding(6).class(Container::Custom(Box::new(move |_| container::Style {
+                            background: selected.then(|| Color::from_rgba(1.0, 1.0, 1.0, 0.22).into()),
+                            border: Border { radius: 16.0.into(), ..Default::default() },
+                            ..Default::default()
+                        }))),
+                    )
+                    .id(self.result_ids[i].clone())
+                    .padding(0)
+                    .on_press(Message::Activate(Some(i)))
+                    .class(Button::Transparent);
+                    strip = strip.push(
+                        Column::new()
+                            .push(tile)
+                            .push(container(label).width(Length::Fixed(84.0)).center_x(Length::Fixed(84.0)).height(Length::Fixed(18.0)))
+                            .align_x(Alignment::Center)
+                            .width(Length::Fixed(84.0))
+                            .spacing(4),
+                    );
+                }
+                content = content.push(
+                    container(strip)
+                        .padding([14, 14, 8, 14])
+                        .class(Container::Custom(Box::new(|theme| {
+                            let t = theme.cosmic();
+                            let mut bg: Color = t.background(theme.transparent).base.into();
+                            bg.a = bg.a.max(0.9);
+                            container::Style {
+                                text_color: Some(t.on_bg_color().into()),
+                                icon_color: Some(t.on_bg_color().into()),
+                                background: Some(bg.into()),
+                                border: Border {
+                                    radius: 26.0.into(),
+                                    width: 1.0,
+                                    color: if t.is_dark { Color::from_rgba(1.0, 1.0, 1.0, 0.12) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.08) },
+                                },
+                                shadow: Shadow::default(),
+                                snap: true,
+                            }
+                        }))),
+                );
+            } else if let Some(r) = results {
                 content = content.push(r);
             }
 
             let window = Column::new()
-                .push(vertical_space().height(Length::Fixed(if self.alt_tab { self.margin + 16. } else { *MAC_TOP })))
+                .push(vertical_space().height(Length::Fixed(if self.alt_tab { *MAC_TOP + 60.0 } else { *MAC_TOP })))
                 .push(id_container(content, MAIN_ID.clone()));
 
             let autosize = autosize::autosize(

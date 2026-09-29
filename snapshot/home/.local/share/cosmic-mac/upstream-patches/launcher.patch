@@ -1,5 +1,5 @@
 diff --git a/src/app.rs b/src/app.rs
-index 93e319a..36de15b 100644
+index 93e319a..fda764d 100644
 --- a/src/app.rs
 +++ b/src/app.rs
 @@ -61,6 +61,66 @@ static SCROLLABLE: LazyLock<Id> = LazyLock::new(|| Id::new("scrollable"));
@@ -82,7 +82,7 @@ index 93e319a..36de15b 100644
                  namespace: "launcher".into(),
                  size: None,
 -                size_limits: Limits::NONE.min_width(1.0).min_height(1.0).max_width(600.0),
-+                size_limits: Limits::NONE.min_width(1.0).min_height(1.0).max_width(900.0),
++                size_limits: Limits::NONE.min_width(1.0).min_height(1.0).max_width(1600.0),
                  exclusive_zone: -1,
                  ..Default::default()
              },
@@ -107,7 +107,7 @@ index 93e319a..36de15b 100644
              Message::InputChanged(value) => {
                  self.input_value.clone_from(&value);
                  self.focused = 0;
-@@ -907,251 +982,159 @@ impl cosmic::Application for CosmicLauncher {
+@@ -907,251 +982,214 @@ impl cosmic::Application for CosmicLauncher {
      #[allow(clippy::too_many_lines)]
      fn view_window(&self, id: SurfaceId) -> Element<'_, Self::Message> {
          if id == self.window_id {
@@ -241,6 +241,14 @@ index 93e319a..36de15b 100644
 -                                })))
 -                                .into(),
 -                        );
+-                    }
+-                    if let Some(Some(icon_handle)) = self.launcher_item_icon_handles.get(i) {
+-                        button_content.push(
+-                            icon(icon_handle.clone())
+-                                .width(Length::Fixed(32.0))
+-                                .height(Length::Fixed(32.0))
+-                                .into(),
+-                        );
 +                    let is_focused = i == self.focused;
 +                    let title = text::body(name.lines().next().unwrap_or_default().to_string())
 +                        .font(cosmic::font::semibold())
@@ -257,17 +265,6 @@ index 93e319a..36de15b 100644
 +                    match self.launcher_item_icon_handles.get(i) {
 +                        Some(Some(h)) => content.push(icon(h.clone()).width(Length::Fixed(32.0)).height(Length::Fixed(32.0)).into()),
 +                        _ => content.push(icon::from_name("application-x-executable").size(32).into()),
-                     }
--                    if let Some(Some(icon_handle)) = self.launcher_item_icon_handles.get(i) {
--                        button_content.push(
--                            icon(icon_handle.clone())
--                                .width(Length::Fixed(32.0))
--                                .height(Length::Fixed(32.0))
--                                .into(),
--                        );
-+                    let mut text_col = column![title];
-+                    if !desc.trim().is_empty() {
-+                        text_col = text_col.push(subtitle);
                      }
 -
 -                    button_content.push(column![name, desc].width(Length::FillPortion(5)).into());
@@ -291,7 +288,10 @@ index 93e319a..36de15b 100644
 -                            .align_x(Horizontal::Right)
 -                            .into(),
 -                        );
--                    }
++                    let mut text_col = column![title];
++                    if !desc.trim().is_empty() {
++                        text_col = text_col.push(subtitle);
+                     }
 -                    let is_focused = i == self.focused;
 -                    let btn = mouse_area(
 -                        cosmic::widget::button::custom(
@@ -341,7 +341,19 @@ index 93e319a..36de15b 100644
 -                                    outline_width: 0.0,
 -                                    ..text
 -                                }
--                            }),
++                    content.push(text_col.width(Length::Fill).into());
++                    mouse_area(
++                        cosmic::widget::button::custom(row(content).spacing(10).align_y(Alignment::Center))
++                            .id(self.result_ids[i].clone())
++                            .width(Length::Fill)
++                            .on_press(Message::Activate(Some(i)))
++                            .padding([6, 10])
++                            .class(Button::Custom {
++                                active: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.0)),
++                                hovered: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.06)),
++                                pressed: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.1)),
++                                disabled: Box::new(move |theme| mac_row(theme, false, 0.0)),
+                             }),
 -                            pressed: Box::new(move |focused, theme| {
 -                                let focused = is_focused || focused;
 -                                let rad_s = theme.cosmic().corner_radii.radius_s;
@@ -357,19 +369,7 @@ index 93e319a..36de15b 100644
 -                                    outline_width: 0.0,
 -                                    ..text
 -                                }
-+                    content.push(text_col.width(Length::Fill).into());
-+                    mouse_area(
-+                        cosmic::widget::button::custom(row(content).spacing(10).align_y(Alignment::Center))
-+                            .id(self.result_ids[i].clone())
-+                            .width(Length::Fill)
-+                            .on_press(Message::Activate(Some(i)))
-+                            .padding([6, 10])
-+                            .class(Button::Custom {
-+                                active: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.0)),
-+                                hovered: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.06)),
-+                                pressed: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.1)),
-+                                disabled: Box::new(move |theme| mac_row(theme, false, 0.0)),
-                             }),
+-                            }),
 -                        }),
                      )
 -                    .on_right_release(Message::Context(i));
@@ -445,39 +445,84 @@ index 93e319a..36de15b 100644
                  );
 -            } else if !buttons.is_empty() {
 -                content = content.push(components::list::column(buttons));
-+            }
-+            if let Some(r) = results {
-+                content = content.push(r);
              }
- 
-             let window = Column::new()
+-
+-            let window = Column::new()
 -                .push(vertical_space().height(Length::Fixed(self.margin + 16.)))
 -                .push(
 -                    container(id_container(content, MAIN_ID.clone()))
 -                        .width(Length::Shrink)
 -                        .height(Length::Shrink)
--                        .class(Container::Custom(Box::new(|theme| {
--                            let t = theme.cosmic();
++            if self.alt_tab {
++                // macOS Command-Tab: one row of big icons, the selected one highlighted
++                // with its name underneath.
++                let mut strip = cosmic::widget::Row::new().spacing(6).align_y(Alignment::Start);
++                for (i, item) in self.launcher_items.iter().enumerate() {
++                    let selected = i == self.focused;
++                    let glyph: Element<'_, Message> = match self.launcher_item_icon_handles.get(i) {
++                        Some(Some(h)) => icon(h.clone()).width(Length::Fixed(72.0)).height(Length::Fixed(72.0)).into(),
++                        _ => icon::from_name("application-x-executable").size(72).into(),
++                    };
++                    let app_name = if item.window.is_some() { &item.description } else { &item.name };
++                    let label = text::caption(if selected { app_name.lines().next().unwrap_or_default().to_string() } else { String::new() })
++                        .size(12)
++                        .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
++                    let tile = cosmic::widget::button::custom(
++                        container(glyph).padding(6).class(Container::Custom(Box::new(move |_| container::Style {
++                            background: selected.then(|| Color::from_rgba(1.0, 1.0, 1.0, 0.22).into()),
++                            border: Border { radius: 16.0.into(), ..Default::default() },
++                            ..Default::default()
++                        }))),
++                    )
++                    .id(self.result_ids[i].clone())
++                    .padding(0)
++                    .on_press(Message::Activate(Some(i)))
++                    .class(Button::Transparent);
++                    strip = strip.push(
++                        Column::new()
++                            .push(tile)
++                            .push(container(label).width(Length::Fixed(84.0)).center_x(Length::Fixed(84.0)).height(Length::Fixed(18.0)))
++                            .align_x(Alignment::Center)
++                            .width(Length::Fixed(84.0))
++                            .spacing(4),
++                    );
++                }
++                content = content.push(
++                    container(strip)
++                        .padding([14, 14, 8, 14])
+                         .class(Container::Custom(Box::new(|theme| {
+                             let t = theme.cosmic();
 -                            let radii = t.radius_s().map(|x| if x < 4.0 { x } else { x + 4.0 });
 -
--                            container::Style {
--                                text_color: Some(t.on_bg_color().into()),
--                                icon_color: Some(t.on_bg_color().into()),
++                            let mut bg: Color = t.background(theme.transparent).base.into();
++                            bg.a = bg.a.max(0.9);
+                             container::Style {
+                                 text_color: Some(t.on_bg_color().into()),
+                                 icon_color: Some(t.on_bg_color().into()),
 -                                background: Some(
 -                                    Color::from(t.background(theme.transparent).base).into(),
 -                                ),
--                                border: Border {
++                                background: Some(bg.into()),
+                                 border: Border {
 -                                    radius: radii.into(),
--                                    width: 1.0,
++                                    radius: 26.0.into(),
+                                     width: 1.0,
 -                                    color: t.bg_divider().into(),
--                                },
--                                shadow: Shadow::default(),
--                                snap: true,
--                            }
++                                    color: if t.is_dark { Color::from_rgba(1.0, 1.0, 1.0, 0.12) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.08) },
+                                 },
+                                 shadow: Shadow::default(),
+                                 snap: true,
+                             }
 -                        })))
 -                        .padding([24, 32]),
--                );
-+                .push(vertical_space().height(Length::Fixed(if self.alt_tab { self.margin + 16. } else { *MAC_TOP })))
++                        }))),
+                 );
++            } else if let Some(r) = results {
++                content = content.push(r);
++            }
++
++            let window = Column::new()
++                .push(vertical_space().height(Length::Fixed(if self.alt_tab { *MAC_TOP + 60.0 } else { *MAC_TOP })))
 +                .push(id_container(content, MAIN_ID.clone()));
  
              let autosize = autosize::autosize(
