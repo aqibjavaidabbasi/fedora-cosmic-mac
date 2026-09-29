@@ -567,15 +567,25 @@ impl App {
             .skip(1)
             .step_by(2)
             .map(str::to_string)
-            .filter(|e| e != "Panel" && e != "Dock")
+            .filter(|e| e != "Panel")
             .collect();
+        // "Dock" stays in the list so COSMIC Settings shows the Dock as on and edits
+        // its settings; it is pointed at a display that doesn't exist, and the real
+        // docks are the per-display copies. Turning the Dock off in Settings removes
+        // "Dock", which removes the copies too (see also dock-sync.sh).
+        let dock_on = list.iter().any(|e| e == "Dock");
+        write_if_changed(
+            &format!("{}/output", cosmic_dir("com.system76.CosmicPanel.Dock")),
+            "Name(\"cosmic-mac-template\")",
+        );
+        list.retain(|e| dock_on || !e.starts_with("Dock-"));
         for name in &names {
             let entry = panel_entry(name);
             if !list.contains(&entry) {
                 list.insert(0, entry);
             }
         }
-        for name in &names {
+        for name in names.iter().filter(|_| dock_on) {
             let entry = format!("Dock-{name}");
             if !list.contains(&entry) {
                 list.push(entry);

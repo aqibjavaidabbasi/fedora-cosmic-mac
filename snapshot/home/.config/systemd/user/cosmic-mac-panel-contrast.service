@@ -1,6 +1,7 @@
 [Unit]
-Description=Match COSMIC top bar text color to the wallpaper
+Description=Match the top bar to the wallpaper; keep per-display docks in step with the Dock settings
 
 [Service]
 Type=oneshot
+ExecStart=%h/.local/share/cosmic-mac/dock-sync.sh
 ExecStart=%h/.local/share/cosmic-mac/panel-contrast.py

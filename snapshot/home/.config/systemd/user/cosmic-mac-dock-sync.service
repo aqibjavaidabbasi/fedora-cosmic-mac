@@ -1,0 +1,6 @@
+[Unit]
+Description=Copy COSMIC Dock settings to the per-display docks
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/cosmic-mac/dock-sync.sh

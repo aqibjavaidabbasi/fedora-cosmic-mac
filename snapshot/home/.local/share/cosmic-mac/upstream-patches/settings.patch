@@ -231,3 +231,127 @@ index 0000000..ae985c5
 +    .height(Length::Fill)
 +    .into()
 +}
+diff --git a/cosmic-settings/src/pages/desktop/appearance/mode_and_colors.rs b/cosmic-settings/src/pages/desktop/appearance/mode_and_colors.rs
+index 01b31d0..a618bcc 100644
+--- a/cosmic-settings/src/pages/desktop/appearance/mode_and_colors.rs
++++ b/cosmic-settings/src/pages/desktop/appearance/mode_and_colors.rs
+@@ -208,12 +208,10 @@ fn accent_color_palette<'a>(
+     let mut accent_palette_row = Vec::with_capacity(accent.len());
+ 
+     for &color in accent {
+-        accent_palette_row.push(color_button(
++        accent_palette_row.push(mac_swatch(
+             Some(Message::PaletteAccent(color.into())),
+             color.into(),
+             cur_accent == color,
+-            48,
+-            48,
+         ));
+     }
+ 
+@@ -223,26 +221,27 @@ fn accent_color_palette<'a>(
+                 Some(Message::DrawerOpen(ContextView::CustomAccent)),
+                 c,
+                 cosmic::iced::Color::from(cur_accent) == c,
+-                48,
+-                48,
++                26,
++                26,
+             ))
+         } else {
+             container(
+                 page.drawer
+                     .custom_accent
+                     .picker_button(|_| Message::DrawerOpen(ContextView::CustomAccent), Some(24))
+-                    .width(Length::Fixed(48.0))
+-                    .height(Length::Fixed(48.0)),
++                    .width(Length::Fixed(26.0))
++                    .height(Length::Fixed(26.0)),
+             )
+         }
+         .into(),
+     );
+ 
+-    cosmic::iced::widget::column![
+-        text::body(&descriptions[labels["accent_color"]]),
+-        widget::flex_row(accent_palette_row).spacing(16)
++    let _ = space_xxs;
++    cosmic::iced::widget::row![
++        text::body(&descriptions[labels["accent_color"]]).width(Length::Fill),
++        widget::flex_row(accent_palette_row).spacing(10).align_items(Alignment::Center)
+     ]
+-    .spacing(space_xxs)
++    .align_y(Alignment::Center)
+ }
+ 
+ fn theme_mode<'a>(
+@@ -302,6 +301,27 @@ fn theme_mode<'a>(
+     .center_x(Length::Fill)
+ }
+ 
++/// A round 22px colour swatch with a ring when selected (macOS accent picker).
++fn mac_swatch<'a, Message: 'a + Clone>(on_press: Option<Message>, color: cosmic::iced::Color, selected: bool) -> Element<'a, Message> {
++    let dot = container(widget::Space::new().width(Length::Fixed(22.0)).height(Length::Fixed(22.0)))
++        .class(cosmic::theme::Container::custom(move |_| cosmic::iced::widget::container::Style {
++            background: Some(cosmic::iced::Background::Color(color)),
++            border: cosmic::iced::Border { radius: 11.0.into(), ..Default::default() },
++            ..Default::default()
++        }));
++    let ring = container(dot)
++        .padding(2)
++        .class(cosmic::theme::Container::custom(move |t| cosmic::iced::widget::container::Style {
++            border: cosmic::iced::Border {
++                radius: 14.0.into(),
++                width: if selected { 2.0 } else { 0.0 },
++                color: if selected { color } else { cosmic::iced::Color::TRANSPARENT },
++            },
++            ..Default::default()
++        }));
++    button::custom(ring).padding(0).class(button::ButtonClass::Text).on_press_maybe(on_press).into()
++}
++
+ /// A button for selecting a color or gradient.
+ pub fn color_button<'a, Message: 'a + Clone>(
+     on_press: Option<Message>,
+diff --git a/cosmic-settings/src/widget/mod.rs b/cosmic-settings/src/widget/mod.rs
+index e53b151..4fbc5f4 100644
+--- a/cosmic-settings/src/widget/mod.rs
++++ b/cosmic-settings/src/widget/mod.rs
+@@ -88,7 +88,7 @@ pub fn search_page_link<Message: 'static>(title: &str) -> button::TextButton<'_,
+ #[must_use]
+ pub fn page_title<Message: 'static>(page: &page::Info) -> Element<'_, Message> {
+     row::with_capacity(2)
+-        .push(text::title3(page.title.as_str()))
++        .push(text::title4(page.title.as_str()).font(cosmic::font::bold()))
+         .push(horizontal())
+         .into()
+ }
+@@ -166,20 +166,18 @@ pub fn sub_page_header<'a, Message: 'static + Clone>(
+     parent_page: &'a str,
+     on_press: Message,
+ ) -> Element<'a, Message> {
++    // macOS: a round back button beside the bold page title (cosmic-mac patches/settings.py).
++    let _ = parent_page;
+     let previous_button = button::icon(icon::from_name("go-previous-symbolic"))
+-        .extra_small()
+-        .padding(0)
+-        .label(parent_page)
+-        .spacing(4)
+-        .class(button::ButtonClass::Link)
++        .padding(6)
++        .class(button::ButtonClass::Standard)
+         .on_press(on_press);
+ 
+-    let sub_page_header = row::with_capacity(2).push(text::title3(sub_page));
+-
+-    column::with_capacity(2)
++    row::with_capacity(2)
+         .push(previous_button)
+-        .push(sub_page_header)
+-        .spacing(6)
++        .push(text::title4(sub_page).font(cosmic::font::bold()))
++        .spacing(12)
++        .align_y(cosmic::iced::Alignment::Center)
+         .width(Length::Shrink)
+         .into()
+ }

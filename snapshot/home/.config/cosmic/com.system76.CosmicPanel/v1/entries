@@ -1,6 +1,7 @@
 [
     "Panel-DP-1",
     "Panel-eDP-1",
-    "Dock-eDP-1",
+    "Dock",
     "Dock-DP-1",
+    "Dock-eDP-1",
 ]

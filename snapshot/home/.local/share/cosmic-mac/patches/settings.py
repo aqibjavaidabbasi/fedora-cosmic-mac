@@ -43,3 +43,89 @@ sub(r"(    fn header_start\(&self\) -> Vec<Element<'_, Self::Message>> \{\n)    
     r"\1        Vec::new()\n    }\n")
 
 open(p, "w").write(s)
+
+# ---------------------------------------------------------------------------
+# Page header like macOS: a round back button, then the page title in bold,
+# instead of COSMIC's link-style breadcrumb above a large title.
+w = "cosmic-settings/src/widget/mod.rs"
+t = open(w).read()
+t, n1 = re.subn(
+    r"(pub fn page_title<Message: 'static>\(page: &page::Info\) -> Element<'_, Message> \{\n    row::with_capacity\(2\)\n        \.push\()text::title3\(page\.title\.as_str\(\)\)\)",
+    r"\1text::title4(page.title.as_str()).font(cosmic::font::bold()))", t, count=1)
+t, n2 = re.subn(
+    r"    let previous_button = button::icon\(icon::from_name\(\"go-previous-symbolic\"\)\)\n        \.extra_small\(\)\n        \.padding\(0\)\n        \.label\(parent_page\)\n        \.spacing\(4\)\n        \.class\(button::ButtonClass::Link\)\n        \.on_press\(on_press\);\n\n    let sub_page_header = row::with_capacity\(2\)\.push\(text::title3\(sub_page\)\);\n\n    column::with_capacity\(2\)\n        \.push\(previous_button\)\n        \.push\(sub_page_header\)\n        \.spacing\(6\)\n        \.width\(Length::Shrink\)\n        \.into\(\)",
+    "    // macOS: a round back button beside the bold page title (cosmic-mac patches/settings.py).\n"
+    "    let _ = parent_page;\n"
+    "    let previous_button = button::icon(icon::from_name(\"go-previous-symbolic\"))\n"
+    "        .padding(6)\n"
+    "        .class(button::ButtonClass::Standard)\n"
+    "        .on_press(on_press);\n\n"
+    "    row::with_capacity(2)\n"
+    "        .push(previous_button)\n"
+    "        .push(text::title4(sub_page).font(cosmic::font::bold()))\n"
+    "        .spacing(12)\n"
+    "        .align_y(cosmic::iced::Alignment::Center)\n"
+    "        .width(Length::Shrink)\n"
+    "        .into()",
+    t, count=1)
+if n1 != 1 or n2 != 1:
+    print("settings header patch failed", n1, n2, file=sys.stderr)
+    sys.exit(1)
+open(w, "w").write(t)
+
+# ---------------------------------------------------------------------------
+# Appearance: accent colours as a row of small round swatches beside the label,
+# like macOS, instead of a grid of big squares.
+a = "cosmic-settings/src/pages/desktop/appearance/mode_and_colors.rs"
+t = open(a).read()
+t, n3 = re.subn(
+    r"(fn accent_color_palette<'a>\(.*?\n)(\s*for &color in accent \{\n\s*accent_palette_row\.push\()color_button\(\n(\s*Some\(Message::PaletteAccent\(color\.into\(\)\)\),\n\s*color\.into\(\),\n\s*cur_accent == color,\n)\s*48,\n\s*48,\n(\s*\)\);)",
+    r"\1\2mac_swatch(\n\3\4", t, count=1, flags=re.S)
+t, n4 = re.subn(
+    r"    cosmic::iced::widget::column!\[\n        text::body\(&descriptions\[labels\[\"accent_color\"\]\]\),\n        widget::flex_row\(accent_palette_row\)\.spacing\(16\)\n    \]\n    \.spacing\(space_xxs\)",
+    "    let _ = space_xxs;\n"
+    "    cosmic::iced::widget::row![\n"
+    "        text::body(&descriptions[labels[\"accent_color\"]]).width(Length::Fill),\n"
+    "        widget::flex_row(accent_palette_row).spacing(10).align_items(Alignment::Center)\n"
+    "    ]\n"
+    "    .align_y(Alignment::Center)",
+    t, count=1)
+t, n5 = re.subn(r"(\n/// A button for selecting a color or gradient\.\n)", r'''
+/// A round 22px colour swatch with a ring when selected (macOS accent picker).
+fn mac_swatch<'a, Message: 'a + Clone>(on_press: Option<Message>, color: cosmic::iced::Color, selected: bool) -> Element<'a, Message> {
+    let dot = container(widget::Space::new().width(Length::Fixed(22.0)).height(Length::Fixed(22.0)))
+        .class(cosmic::theme::Container::custom(move |_| cosmic::iced::widget::container::Style {
+            background: Some(cosmic::iced::Background::Color(color)),
+            border: cosmic::iced::Border { radius: 11.0.into(), ..Default::default() },
+            ..Default::default()
+        }));
+    let ring = container(dot)
+        .padding(2)
+        .class(cosmic::theme::Container::custom(move |t| cosmic::iced::widget::container::Style {
+            border: cosmic::iced::Border {
+                radius: 14.0.into(),
+                width: if selected { 2.0 } else { 0.0 },
+                color: if selected { color } else { cosmic::iced::Color::TRANSPARENT },
+            },
+            ..Default::default()
+        }));
+    button::custom(ring).padding(0).class(button::ButtonClass::Text).on_press_maybe(on_press).into()
+}
+\1''', t, count=1)
+if (n3, n4, n5) != (1, 1, 1):
+    print("settings accent patch failed", n3, n4, n5, file=sys.stderr)
+    sys.exit(1)
+open(a, "w").write(t)
+
+# the custom-colour button next to the swatches: round and small too
+t = open(a).read()
+t, n6 = re.subn(
+    r"(                    \.picker_button\(\|_\| Message::DrawerOpen\(ContextView::CustomAccent\), Some\(24\)\)\n)                    \.width\(Length::Fixed\(48\.0\)\)\n                    \.height\(Length::Fixed\(48\.0\)\),",
+    r"\1                    .width(Length::Fixed(26.0))\n                    .height(Length::Fixed(26.0)),", t, count=1)
+t, n7 = re.subn(
+    r"(                Some\(Message::DrawerOpen\(ContextView::CustomAccent\)\),\n                c,\n                cosmic::iced::Color::from\(cur_accent\) == c,\n)                48,\n                48,\n",
+    r"\1                26,\n                26,\n", t, count=1)
+if (n6, n7) != (1, 1):
+    print("settings custom accent patch failed", n6, n7, file=sys.stderr)
+    sys.exit(1)
+open(a, "w").write(t)
