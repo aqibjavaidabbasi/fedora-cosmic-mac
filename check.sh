@@ -17,6 +17,7 @@ cosmic-applets applets-built-version cosmic-panel-button Top-left bar buttons
 cosmic-applets cosmic-applet-notifications-built-version cosmic-applet-notifications Notification Center
 cosmic-panel cosmic-panel-built-version cosmic-panel Top bar recolor
 cosmic-workspaces cosmic-workspaces-built-version cosmic-workspaces Centered overview thumbnails
+cosmic-launcher cosmic-launcher-built-version cosmic-launcher Spotlight launcher
 EOF
 
 echo "Helper apps:"

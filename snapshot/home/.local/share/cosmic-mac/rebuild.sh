@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rebuilds the patched COSMIC components (compositor, panel buttons, Notification
-# Center, top bar, overview) for whatever COSMIC version Fedora has installed,
+# Center, top bar, overview, Spotlight launcher) for whatever COSMIC version Fedora has installed,
 # plus the helper apps. It never touches your settings.
 # Run by the daily timer and by the launchers when versions differ.
 # Use --force to rebuild everything even if versions already match.
@@ -46,6 +46,7 @@ if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$AVER" cosmic-applet-notifications-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-panel 2>/dev/null)" cosmic-panel-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-workspaces 2>/dev/null)" cosmic-workspaces-built-version \
+   && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-launcher 2>/dev/null)" cosmic-launcher-built-version \
    && [ -x "$HOME/.local/bin/cosmic-mac-control-center" ] && [ -x "$HOME/.local/bin/cosmic-mac-battery" ] \
    && [ -x "$HOME/.local/bin/cosmic-mac-wifi" ] && [ -x "$HOME/.local/bin/cosmic-mac-bluetooth" ] \
    && [ -x "$HOME/.local/bin/cosmic-mac-stats" ]; then
@@ -173,6 +174,7 @@ rebuild_extra() {
 }
 rebuild_extra cosmic-panel cosmic-panel panel cosmic-panel-bin cosmic-panel
 rebuild_extra cosmic-workspaces cosmic-workspaces-epoch workspaces "" cosmic-workspaces
+rebuild_extra cosmic-launcher cosmic-launcher launcher "" cosmic-launcher
 
 # --- Control Center and Battery (standalone; rebuilt when missing or forced) ---
 build_app() {

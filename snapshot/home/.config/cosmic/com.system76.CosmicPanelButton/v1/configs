@@ -1,4 +1,4 @@
 {
-    "*/com.system76.CosmicAppLibrary": (force_presentation: Some(Icon)),
+    "*/com.system76.CosmicAppLibrary": (force_presentation: Some(Icon), icon: Some("/home/aqibj/Downloads/favicon.png")),
     "Dock": (force_presentation: Some(Icon)),
 }

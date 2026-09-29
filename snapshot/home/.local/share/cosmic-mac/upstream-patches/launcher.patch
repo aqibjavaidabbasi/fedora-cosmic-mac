@@ -1,0 +1,484 @@
+diff --git a/src/app.rs b/src/app.rs
+index 93e319a..36de15b 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -61,6 +61,66 @@ static SCROLLABLE: LazyLock<Id> = LazyLock::new(|| Id::new("scrollable"));
+ pub(crate) static MENU_ID: LazyLock<SurfaceId> = LazyLock::new(SurfaceId::unique);
+ const SCROLL_MIN: usize = 8;
+ 
++// ---- macOS Spotlight helpers (cosmic-mac patches/launcher.py) ----
++const MAC_BAR_W: f32 = 520.0;
++
++/// Top offset of the Spotlight pill: about a third of the way down the smallest screen.
++static MAC_TOP: LazyLock<f32> = LazyLock::new(|| {
++    let out = std::process::Command::new("cosmic-randr").arg("list").output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
++    let mut scale = 1.0f32;
++    let mut heights = Vec::new();
++    for line in out.lines() {
++        let l: String = line.chars().filter(|c| !c.is_control()).collect();
++        let l = l.replace("[0m", "").replace("[1;33m", "");
++        if let Some(v) = l.trim().strip_prefix("Scale:") {
++            scale = v.trim().trim_end_matches('%').parse::<f32>().map(|p| p / 100.0).unwrap_or(1.0);
++        } else if l.contains("(current)") {
++            if let Some(h) = l.trim().split_whitespace().next().and_then(|m| m.split('x').nth(1)).and_then(|h| h.parse::<f32>().ok()) {
++                heights.push(h / scale.max(0.1));
++            }
++        }
++    }
++    heights.into_iter().fold(f32::MAX, f32::min).min(1400.0).max(600.0) * 0.36
++});
++
++fn mac_circle(theme: &cosmic::Theme, hover: f32) -> button::Style {
++    let t = theme.cosmic();
++    let mut bg: Color = t.background(theme.transparent).base.into();
++    bg.a = bg.a.max(0.92);
++    let on: Color = t.on_bg_color().into();
++    button::Style {
++        background: Some(Color { r: bg.r + (on.r - bg.r) * hover, g: bg.g + (on.g - bg.g) * hover, b: bg.b + (on.b - bg.b) * hover, a: bg.a }.into()),
++        border_radius: 999.0.into(),
++        border_width: 1.0,
++        border_color: if t.is_dark { Color::from_rgba(1.0, 1.0, 1.0, 0.14) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.10) },
++        icon_color: Some(on),
++        text_color: Some(on),
++        ..button::Style::new()
++    }
++}
++
++fn mac_row(theme: &cosmic::Theme, selected: bool, hover: f32) -> button::Style {
++    let t = theme.cosmic();
++    let on: Color = t.on_bg_color().into();
++    let bg = if selected {
++        let mut a: Color = t.accent_color().into();
++        a.a = 0.35;
++        Some(a.into())
++    } else if hover > 0.0 {
++        Some(Color { a: hover, ..on }.into())
++    } else {
++        None
++    };
++    button::Style {
++        background: bg,
++        border_radius: 12.0.into(),
++        outline_width: 0.0,
++        icon_color: Some(on),
++        text_color: Some(on),
++        ..button::Style::new()
++    }
++}
++
+ #[derive(Parser, Debug, Serialize, Deserialize, Clone)]
+ #[command(author, version, about, long_about = None)]
+ #[command(propagate_version = true)]
+@@ -169,6 +229,7 @@ pub struct CosmicLauncher {
+ #[derive(Debug, Clone)]
+ pub enum Message {
+     InputChanged(String),
++    MacOpen(&'static str),
+     Backspace,
+     TabPress,
+     CompleteFocusedId(Id),
+@@ -250,7 +311,7 @@ impl CosmicLauncher {
+                 anchor: Anchor::TOP,
+                 namespace: "launcher".into(),
+                 size: None,
+-                size_limits: Limits::NONE.min_width(1.0).min_height(1.0).max_width(600.0),
++                size_limits: Limits::NONE.min_width(1.0).min_height(1.0).max_width(900.0),
+                 exclusive_zone: -1,
+                 ..Default::default()
+             },
+@@ -440,6 +501,20 @@ impl cosmic::Application for CosmicLauncher {
+     #[allow(clippy::too_many_lines)]
+     fn update(&mut self, message: Message) -> Task<Self::Message> {
+         match message {
++            Message::MacOpen(what) => {
++                let (cmd, args): (&str, &[&str]) = match what {
++                    "apps" => ("cosmic-app-library", &[]),
++                    "files" => ("cosmic-files", &[]),
++                    "shortcuts" => ("cosmic-settings", &["keyboard"]),
++                    _ => ("cosmic-settings", &[]),
++                };
++                if let Ok(mut c) = std::process::Command::new(cmd).args(args).spawn() {
++                    std::thread::spawn(move || {
++                        let _ = c.wait();
++                    });
++                }
++                return self.hide();
++            }
+             Message::InputChanged(value) => {
+                 self.input_value.clone_from(&value);
+                 self.focused = 0;
+@@ -907,251 +982,159 @@ impl cosmic::Application for CosmicLauncher {
+     #[allow(clippy::too_many_lines)]
+     fn view_window(&self, id: SurfaceId) -> Element<'_, Self::Message> {
+         if id == self.window_id {
+-            let launcher_entry = text_input::search_input(fl!("type-to-search"), &self.input_value)
++            // ---- macOS Spotlight (cosmic-mac patches/launcher.py) ----
++            let pill_style = |theme: &cosmic::Theme| {
++                let t = theme.cosmic();
++                let mut a = theme.focused(&cosmic::theme::TextInput::Search);
++                let mut bg: Color = t.background(theme.transparent).base.into();
++                bg.a = bg.a.max(0.92);
++                a.background = bg.into();
++                a.border_radius = 26.0.into();
++                a.border_width = 1.0;
++                a.border_color = if t.is_dark { Color::from_rgba(1.0, 1.0, 1.0, 0.14) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.10) };
++                a.border_offset = None;
++                a
++            };
++            let launcher_entry = text_input::search_input(String::from("Spotlight Search"), &self.input_value)
+                 .on_input(Message::InputChanged)
+                 .on_paste(Message::InputChanged)
+                 .on_submit(|_| Message::Activate(None))
+                 .on_tab(Message::TabPress)
++                .size(20)
++                .padding([12, 20])
+                 .style(cosmic::theme::TextInput::Custom {
+-                    active: Box::new(|theme| theme.focused(&cosmic::theme::TextInput::Search)),
+-                    error: Box::new(|theme| theme.focused(&cosmic::theme::TextInput::Search)),
+-                    hovered: Box::new(|theme| theme.focused(&cosmic::theme::TextInput::Search)),
+-                    focused: Box::new(|theme| theme.focused(&cosmic::theme::TextInput::Search)),
+-                    disabled: Box::new(|theme| theme.disabled(&cosmic::theme::TextInput::Search)),
++                    active: Box::new(pill_style),
++                    error: Box::new(pill_style),
++                    hovered: Box::new(pill_style),
++                    focused: Box::new(pill_style),
++                    disabled: Box::new(pill_style),
+                 })
+-                .width(600.)
++                .width(MAC_BAR_W)
+                 .id(INPUT_ID.clone())
+                 .always_active();
+ 
+-            let buttons: Vec<_> = self
++            let circle = |icon_name: &'static str, what: &'static str| {
++                cosmic::widget::button::custom(
++                    container(icon::from_name(icon_name).size(22).symbolic(true))
++                        .width(Length::Fill)
++                        .height(Length::Fill)
++                        .align_x(Horizontal::Center)
++                        .align_y(Vertical::Center),
++                )
++                .width(Length::Fixed(52.0))
++                .height(Length::Fixed(52.0))
++                .padding(0)
++                .on_press(Message::MacOpen(what))
++                .class(Button::Custom {
++                    active: Box::new(|_, theme| mac_circle(theme, 0.0)),
++                    hovered: Box::new(|_, theme| mac_circle(theme, 0.08)),
++                    pressed: Box::new(|_, theme| mac_circle(theme, 0.14)),
++                    disabled: Box::new(|theme| mac_circle(theme, 0.0)),
++                })
++            };
++
++            let rows: Vec<Element<'_, Message>> = self
+                 .launcher_items
+                 .iter()
+                 .enumerate()
+-                .flat_map(|(i, item)| {
++                .map(|(i, item)| {
+                     let (name, desc) = if item.window.is_some() {
+                         (&item.description, &item.name)
+                     } else {
+                         (&item.name, &item.description)
+                     };
+-
+-                    let name = Column::with_children(name.lines().map(|line| {
+-                        text::body(line.to_string())
+-                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+-                            .align_x(Horizontal::Left)
+-                            .align_y(Vertical::Center)
+-                            .class(cosmic::theme::Text::Custom(|t| {
+-                                let theme = t.cosmic();
+-                                cosmic::iced::widget::text::Style {
+-                                    color: Some(theme.on_bg_color().into()),
+-                                    selected_fill: theme.accent_color().into(),
+-                                }
+-                            }))
+-                            .into()
+-                    }));
+-
+-                    let desc = Column::with_children(desc.lines().map(|line| {
+-                        text::caption(line.to_string())
+-                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+-                            .align_x(Horizontal::Left)
+-                            .align_y(Vertical::Center)
+-                            .class(theme::Text::Custom(|t| {
+-                                let theme = t.cosmic();
+-                                cosmic::iced::widget::text::Style {
+-                                    color: Some(theme.on_bg_color().into()),
+-                                    selected_fill: theme.accent_color().into(),
+-                                }
+-                            }))
+-                            .into()
+-                    }));
+-
+-                    let mut button_content = Vec::new();
+-                    if !self.alt_tab
+-                        && let Some(source) = item.category_icon.as_ref()
+-                    {
+-                        let icon_handle = match source {
+-                            IconSource::Name(name) => {
+-                                if Path::new(name.as_ref()).exists() {
+-                                    icon::from_path(Path::new(name.as_ref()).into())
+-                                } else {
+-                                    icon::from_name(name.as_ref()).handle()
+-                                }
+-                            }
+-
+-                            IconSource::Mime(mime) => {
+-                                icon::from_name(mime.as_ref().replace('/', "-")).handle()
+-                            }
+-                        };
+-
+-                        button_content.push(
+-                            icon(icon_handle)
+-                                .width(Length::Fixed(16.0))
+-                                .height(Length::Fixed(16.0))
+-                                .class(cosmic::theme::Svg::Custom(Rc::new(|theme| {
+-                                    cosmic::iced::widget::svg::Style {
+-                                        color: Some(theme.cosmic().on_bg_color().into()),
+-                                    }
+-                                })))
+-                                .into(),
+-                        );
++                    let is_focused = i == self.focused;
++                    let title = text::body(name.lines().next().unwrap_or_default().to_string())
++                        .font(cosmic::font::semibold())
++                        .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
++                    let subtitle = text::caption(desc.lines().next().unwrap_or_default().to_string())
++                        .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
++                        .class(theme::Text::Custom(|t| {
++                            let c = t.cosmic();
++                            let mut color: Color = c.on_bg_color().into();
++                            color.a = 0.6;
++                            cosmic::iced::widget::text::Style { color: Some(color), selected_fill: c.accent_color().into() }
++                        }));
++                    let mut content = Vec::new();
++                    match self.launcher_item_icon_handles.get(i) {
++                        Some(Some(h)) => content.push(icon(h.clone()).width(Length::Fixed(32.0)).height(Length::Fixed(32.0)).into()),
++                        _ => content.push(icon::from_name("application-x-executable").size(32).into()),
+                     }
+-                    if let Some(Some(icon_handle)) = self.launcher_item_icon_handles.get(i) {
+-                        button_content.push(
+-                            icon(icon_handle.clone())
+-                                .width(Length::Fixed(32.0))
+-                                .height(Length::Fixed(32.0))
+-                                .into(),
+-                        );
++                    let mut text_col = column![title];
++                    if !desc.trim().is_empty() {
++                        text_col = text_col.push(subtitle);
+                     }
+-
+-                    button_content.push(column![name, desc].width(Length::FillPortion(5)).into());
+-                    if i < 10 {
+-                        button_content.push(
+-                            container(
+-                                text::body(format!("Ctrl + {}", (i + 1) % 10))
+-                                    .align_y(Vertical::Center)
+-                                    .align_x(Horizontal::Right)
+-                                    .class(theme::Text::Custom(|t| {
+-                                        let theme = t.cosmic();
+-                                        cosmic::iced::widget::text::Style {
+-                                            color: Some(theme.on_bg_color().into()),
+-                                            selected_fill: theme.accent_color().into(),
+-                                        }
+-                                    })),
+-                            )
+-                            .width(Length::FillPortion(1))
+-                            .center_y(Length::Shrink)
+-                            .align_y(Vertical::Center)
+-                            .align_x(Horizontal::Right)
+-                            .into(),
+-                        );
+-                    }
+-                    let is_focused = i == self.focused;
+-                    let btn = mouse_area(
+-                        cosmic::widget::button::custom(
+-                            row(button_content).spacing(8).align_y(Alignment::Center),
+-                        )
+-                        .id(self.result_ids[i].clone())
+-                        .width(Length::Fill)
+-                        .on_press(Message::Activate(Some(i)))
+-                        .padding([8, 24])
+-                        .class(Button::Custom {
+-                            active: Box::new(move |focused, theme| {
+-                                let focused = is_focused || focused;
+-                                let rad_s = theme.cosmic().corner_radii.radius_s;
+-                                let a = if focused {
+-                                    button::Catalog::hovered(theme, focused, focused, &Button::Text)
+-                                } else {
+-                                    button::Catalog::active(theme, focused, focused, &Button::Text)
+-                                };
+-                                button::Style {
+-                                    border_radius: rad_s.into(),
+-                                    outline_width: 0.0,
+-                                    ..a
+-                                }
+-                            }),
+-                            hovered: Box::new(move |focused, theme| {
+-                                let focused = is_focused || focused;
+-                                let rad_s = theme.cosmic().corner_radii.radius_s;
+-
+-                                let text = button::Catalog::hovered(
+-                                    theme,
+-                                    focused,
+-                                    focused,
+-                                    &Button::Text,
+-                                );
+-                                button::Style {
+-                                    border_radius: rad_s.into(),
+-                                    outline_width: 0.0,
+-                                    ..text
+-                                }
+-                            }),
+-                            disabled: Box::new(|theme| {
+-                                let rad_s = theme.cosmic().corner_radii.radius_s;
+-
+-                                let text = button::Catalog::disabled(theme, &Button::Text);
+-                                button::Style {
+-                                    border_radius: rad_s.into(),
+-                                    outline_width: 0.0,
+-                                    ..text
+-                                }
+-                            }),
+-                            pressed: Box::new(move |focused, theme| {
+-                                let focused = is_focused || focused;
+-                                let rad_s = theme.cosmic().corner_radii.radius_s;
+-
+-                                let text = button::Catalog::pressed(
+-                                    theme,
+-                                    focused,
+-                                    focused,
+-                                    &Button::Text,
+-                                );
+-                                button::Style {
+-                                    border_radius: rad_s.into(),
+-                                    outline_width: 0.0,
+-                                    ..text
+-                                }
++                    content.push(text_col.width(Length::Fill).into());
++                    mouse_area(
++                        cosmic::widget::button::custom(row(content).spacing(10).align_y(Alignment::Center))
++                            .id(self.result_ids[i].clone())
++                            .width(Length::Fill)
++                            .on_press(Message::Activate(Some(i)))
++                            .padding([6, 10])
++                            .class(Button::Custom {
++                                active: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.0)),
++                                hovered: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.06)),
++                                pressed: Box::new(move |f, theme| mac_row(theme, is_focused || f, 0.1)),
++                                disabled: Box::new(move |theme| mac_row(theme, false, 0.0)),
+                             }),
+-                        }),
+                     )
+-                    .on_right_release(Message::Context(i));
+-                    if i == self.launcher_items.len() - 1 {
+-                        vec![btn.into()]
+-                    } else {
+-                        vec![btn.into(), divider::horizontal::light().into()]
+-                    }
++                    .on_right_release(Message::Context(i))
++                    .into()
+                 })
+                 .collect();
+ 
+-            let mut content = if self.alt_tab {
+-                Column::new()
+-                    .max_width(600)
+-                    .spacing(16)
+-                    .width(Length::Fixed(600.))
+-                    .height(Length::Shrink)
+-            } else {
+-                column![launcher_entry]
+-                    .max_width(600)
+-                    .width(Length::Shrink)
+-                    .height(Length::Shrink)
+-                    .spacing(16)
+-            };
++            // Suggestions only once something is typed (the switcher always lists windows).
++            let show_rows = !rows.is_empty() && (self.alt_tab || !self.input_value.is_empty());
++            let results = show_rows.then(|| {
++                let list = Column::with_children(rows).spacing(2);
++                let list: Element<'_, Message> = if self.launcher_items.len() > SCROLL_MIN {
++                    container(scrollable(list).id(SCROLLABLE.clone())).max_height(460).into()
++                } else {
++                    list.into()
++                };
++                container(list)
++                    .padding(8)
++                    .width(Length::Fixed(if self.alt_tab { 600.0 } else { MAC_BAR_W }))
++                    .class(Container::Custom(Box::new(|theme| {
++                        let t = theme.cosmic();
++                        let mut bg: Color = t.background(theme.transparent).base.into();
++                        bg.a = bg.a.max(0.94);
++                        container::Style {
++                            text_color: Some(t.on_bg_color().into()),
++                            icon_color: Some(t.on_bg_color().into()),
++                            background: Some(bg.into()),
++                            border: Border {
++                                radius: 22.0.into(),
++                                width: 1.0,
++                                color: if t.is_dark { Color::from_rgba(1.0, 1.0, 1.0, 0.12) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.08) },
++                            },
++                            shadow: Shadow::default(),
++                            snap: true,
++                        }
++                    })))
++            });
+ 
+-            if buttons.len() > SCROLL_MIN {
++            let mut content = Column::new().spacing(10).align_x(Alignment::Start);
++            if !self.alt_tab {
+                 content = content.push(
+-                    container(scrollable(components::list::column(buttons)).id(SCROLLABLE.clone()))
+-                        .max_height(504),
++                    row![
++                        launcher_entry,
++                        circle("view-app-grid-symbolic", "apps"),
++                        circle("folder-symbolic", "files"),
++                        circle("input-keyboard-symbolic", "shortcuts"),
++                        circle("emblem-system-symbolic", "settings"),
++                    ]
++                    .spacing(10)
++                    .align_y(Alignment::Center),
+                 );
+-            } else if !buttons.is_empty() {
+-                content = content.push(components::list::column(buttons));
++            }
++            if let Some(r) = results {
++                content = content.push(r);
+             }
+ 
+             let window = Column::new()
+-                .push(vertical_space().height(Length::Fixed(self.margin + 16.)))
+-                .push(
+-                    container(id_container(content, MAIN_ID.clone()))
+-                        .width(Length::Shrink)
+-                        .height(Length::Shrink)
+-                        .class(Container::Custom(Box::new(|theme| {
+-                            let t = theme.cosmic();
+-                            let radii = t.radius_s().map(|x| if x < 4.0 { x } else { x + 4.0 });
+-
+-                            container::Style {
+-                                text_color: Some(t.on_bg_color().into()),
+-                                icon_color: Some(t.on_bg_color().into()),
+-                                background: Some(
+-                                    Color::from(t.background(theme.transparent).base).into(),
+-                                ),
+-                                border: Border {
+-                                    radius: radii.into(),
+-                                    width: 1.0,
+-                                    color: t.bg_divider().into(),
+-                                },
+-                                shadow: Shadow::default(),
+-                                snap: true,
+-                            }
+-                        })))
+-                        .padding([24, 32]),
+-                );
++                .push(vertical_space().height(Length::Fixed(if self.alt_tab { self.margin + 16. } else { *MAC_TOP })))
++                .push(id_container(content, MAIN_ID.clone()));
+ 
+             let autosize = autosize::autosize(
+                 if self.menu.is_some() {
