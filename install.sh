@@ -45,6 +45,7 @@ flatpak install --user -y --noninteractive cosmic \
     io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager \
     com.github.codevardhan.caffeine-applet \
     io.github.marcelogomes90.cosmic-ext-applet-status-hub || echo "Some applets failed to install; the rest still works."
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install --user -y --noninteractive flathub com.dec05eba.gpu_screen_recorder \
     || echo "GPU Screen Recorder failed to install; the Control Center Record tiles will say Not Installed."
 
