@@ -1,6 +1,6 @@
 (
     save_location: Pictures,
-    choice: Rectangle,
+    choice: Output(Some("eDP-1")),
     last_rectangle: Some((
         left: 4044,
         top: 210,

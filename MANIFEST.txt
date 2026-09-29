@@ -26,6 +26,7 @@ cosmic-wallpapers-1.8.0-1.fc44.noarch
 cosmic-workspaces-1.8.0-1.fc44.x86_64
 
 # Flatpak applets (remote cosmic)
+com.dec05eba.gpu_screen_recorder	6.1.2	flathub
 com.github.codevardhan.caffeine-applet	0.1.0	cosmic
 io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager	0.1.0	cosmic
 io.github.cosmic_utils.minimon-applet	1.2.0	cosmic

@@ -38,13 +38,15 @@ if [ ! -d ~/.local/share/icons/WhiteSur-cursors ]; then
     (cd "$T/cursors" && ./install.sh)
 fi
 
-step "Installing top bar applets (Flatpak)"
+step "Installing top bar applets and the screen recorder (Flatpak)"
 flatpak remote-add --user --if-not-exists cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
 flatpak install --user -y --noninteractive cosmic \
     io.github.cosmic_utils.minimon-applet \
     io.github.cosmic_utils.cosmic-ext-applet-clipboard-manager \
     com.github.codevardhan.caffeine-applet \
     io.github.marcelogomes90.cosmic-ext-applet-status-hub || echo "Some applets failed to install; the rest still works."
+flatpak install --user -y --noninteractive flathub com.dec05eba.gpu_screen_recorder \
+    || echo "GPU Screen Recorder failed to install; the Control Center Record tiles will say Not Installed."
 
 step "Backing up your current COSMIC settings"
 if [ -d ~/.config/cosmic ]; then

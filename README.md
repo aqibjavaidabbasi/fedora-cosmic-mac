@@ -25,7 +25,7 @@ What `install.sh` does:
 
 1. Installs COSMIC (if needed), the build tools, and the Inter font with `dnf`.
 2. Downloads the MacTahoe icons and WhiteSur icons and cursors into `~/.local/share/icons`.
-3. Installs the extra top-bar applets from the COSMIC Flatpak repo.
+3. Installs the extra top-bar applets and GPU Screen Recorder (for the Control Center's Record tiles) with Flatpak.
 4. Backs up your current COSMIC settings to `~/.config/cosmic.backup-<date>`.
 5. Copies the toolkit to `~/.local/share/cosmic-mac` and the launchers to `~/.local/bin`.
 6. Builds the patched COSMIC parts and helper apps from source. The first build takes about 25 to 40 minutes.

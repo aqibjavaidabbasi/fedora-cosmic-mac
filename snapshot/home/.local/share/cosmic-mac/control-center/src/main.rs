@@ -14,7 +14,7 @@
 //! It drives the same services COSMIC's own applets use, through their command-line
 //! tools: nmcli, rfkill + bluetoothctl, wpctl, playerctl (MPRIS), cosmic-settings-daemon
 //! over D-Bus (brightness), the cosmic-notifications config (Focus = Do Not Disturb),
-//! the COSMIC theme mode, cosmic-screenshot, gpu-screen-recorder (if installed),
+//! the COSMIC theme mode, cosmic-screenshot, GPU Screen Recorder (Flatpak or native),
 //! loginctl and cosmic-osd.
 
 mod style;
@@ -88,7 +88,7 @@ enum Message {
     Brightness(i32),
     Media(&'static str),
     Screenshot,
-    Record { region: bool },
+    Record { choose: bool },
     Open(&'static str),
     Overview,
     Lock,
@@ -126,8 +126,25 @@ fn dark_path() -> String {
     format!("{}/.config/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark", home())
 }
 
-fn recorder_pidfile() -> String {
-    format!("{}/cosmic-mac-recording.pid", std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into()))
+const GSR_FLATPAK: &str = "com.dec05eba.gpu_screen_recorder";
+
+/// How to start GPU Screen Recorder: the native binary, or its Flatpak.
+fn recorder_command() -> Option<Vec<String>> {
+    if which("gpu-screen-recorder") {
+        return Some(vec!["gpu-screen-recorder".into()]);
+    }
+    let installed = [
+        format!("{}/.local/share/flatpak/app/{GSR_FLATPAK}", home()),
+        format!("/var/lib/flatpak/app/{GSR_FLATPAK}"),
+    ]
+    .iter()
+    .any(|p| std::path::Path::new(p).exists());
+    installed.then(|| vec!["flatpak".into(), "run".into(), "--command=gpu-screen-recorder".into(), GSR_FLATPAK.into()])
+}
+
+/// The recorder process (its name is cut to 15 characters by the kernel).
+fn recording_now() -> bool {
+    Command::new("pgrep").args(["-x", "gpu-screen-reco"]).output().is_ok_and(|o| o.status.success())
 }
 
 fn which(bin: &str) -> bool {
@@ -200,11 +217,8 @@ async fn gather() -> Status {
         });
     }
 
-    s.recorder = which("gpu-screen-recorder");
-    s.recording = std::fs::read_to_string(recorder_pidfile())
-        .ok()
-        .and_then(|p| p.trim().parse::<u32>().ok())
-        .is_some_and(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists());
+    s.recorder = recorder_command().is_some();
+    s.recording = recording_now();
     s
 }
 
@@ -529,25 +543,39 @@ impl cosmic::Application for ControlCenter {
                 run("cosmic-screenshot", &[]);
                 return self.close_popup();
             }
-            Message::Record { region } => {
+            Message::Record { choose } => {
                 if self.status.recording {
-                    if let Ok(pid) = std::fs::read_to_string(recorder_pidfile()) {
-                        run("kill", &["-INT", pid.trim()]);
-                    }
+                    // Stop: GPU Screen Recorder finishes the file on SIGINT.
+                    run("pkill", &["-INT", "-x", "gpu-screen-reco"]);
                     self.status.recording = false;
-                } else if self.status.recorder {
-                    let file = format!("{}/Videos/Recording {}.mp4", home(), stamp());
-                    let target = if region { "region" } else { "portal" };
-                    if let Ok(mut child) = Command::new("gpu-screen-recorder").args(["-w", target, "-f", "60", "-o", &file]).spawn() {
-                        let _ = std::fs::write(recorder_pidfile(), child.id().to_string());
+                } else if let Some(cmd) = recorder_command() {
+                    // Both go through COSMIC's screen-share dialog (no root helper needed):
+                    // "Record Selection" always asks what to record; "Record Screen" reuses
+                    // the last choice after the first time, so it starts straight away.
+                    let dir = format!("{}/Videos", home());
+                    let _ = std::fs::create_dir_all(&dir);
+                    let file = format!("{dir}/Screen Recording {}.mp4", stamp());
+                    let token = format!("{}/.config/cosmic-mac/recorder-portal-token", home());
+                    let mut args: Vec<String> = cmd[1..].to_vec();
+                    args.extend(["-w", "portal", "-f", "60", "-cursor", "yes", "-o"].map(String::from));
+                    args.push(file.clone());
+                    if !choose {
+                        args.extend(["-restore-portal-session", "yes", "-portal-session-token-filepath"].map(String::from));
+                        args.push(token);
+                    }
+                    if let Ok(mut child) = Command::new(&cmd[0]).args(&args).spawn() {
                         self.status.recording = true;
                         std::thread::spawn(move || {
-                            let _ = child.wait();
+                            let ok = child.wait().is_ok_and(|s| s.success() || s.code() == Some(130));
+                            if ok && std::path::Path::new(&file).exists() {
+                                let _ = Command::new("notify-send")
+                                    .args(["-a", "Screen Recording", "-i", "media-record-symbolic", "Screen recording saved", &file])
+                                    .status();
+                            }
                         });
                     }
                     return self.close_popup();
                 } else {
-                    // No recorder yet: open the app store so one can be installed.
                     run("cosmic-store", &[]);
                     return self.close_popup();
                 }
@@ -569,6 +597,19 @@ impl cosmic::Application for ControlCenter {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // While recording, the icon becomes a red record dot (click it to open the stop tiles).
+        if self.status.recording {
+            let (pad_major, pad_minor) = self.core.applet.suggested_padding(true);
+            let (size, _) = self.core.applet.suggested_size(true);
+            let dot = container(icon::from_name("media-record-symbolic").size(size).symbolic(true)).class(theme::Container::custom(|_| {
+                cosmic::iced::widget::container::Style { icon_color: Some(Color::from_rgb(1.0, 0.231, 0.188)), ..Default::default() }
+            }));
+            return self
+                .core
+                .applet
+                .autosize_window(button::custom(dot).class(Button::AppletIcon).padding([pad_minor, pad_major]).on_press_down(Message::TogglePopup))
+                .into();
+        }
         self.core.applet.icon_button("com.aqib.control-center-symbolic").on_press_down(Message::TogglePopup).into()
     }
 
@@ -634,15 +675,15 @@ impl cosmic::Application for ControlCenter {
         grid = grid
             .push(
                 row![
-                    pill("selection-mode-symbolic", "Record Selection", rec_sub.clone(), s.recording, Message::Record { region: true }),
+                    pill("selection-mode-symbolic", "Record Selection", rec_sub.clone(), s.recording, Message::Record { choose: true }),
                     pill("applets-screenshooter-symbolic", "Capture", None, false, Message::Screenshot),
                 ]
                 .spacing(GAP),
             )
             .push(
                 row![
-                    pill("media-record-symbolic", "Record Screen", rec_sub, s.recording, Message::Record { region: false }),
-                    pill("camera-video-symbolic", "Record", on_off(s.recording), s.recording, Message::Record { region: false }),
+                    pill("media-record-symbolic", "Record Screen", rec_sub, s.recording, Message::Record { choose: false }),
+                    pill("camera-video-symbolic", "Record", on_off(s.recording), s.recording, Message::Record { choose: false }),
                 ]
                 .spacing(GAP),
             );
@@ -665,7 +706,7 @@ impl cosmic::Application for ControlCenter {
 
     fn subscription(&self) -> Subscription<Message> {
         let open = time::every(Duration::from_millis(500)).map(|_| Message::CheckOpen);
-        if self.popup.is_some() {
+        if self.popup.is_some() || self.status.recording {
             Subscription::batch([open, time::every(Duration::from_secs(2)).map(|_| Message::Refresh)])
         } else {
             open

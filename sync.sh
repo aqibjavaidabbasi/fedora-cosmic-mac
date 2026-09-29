@@ -28,7 +28,7 @@ cp -a "$HOME/.bash_profile" "$S/.bash_profile"
 
 { echo "# Installed COSMIC packages (rpm)"; rpm -qa 'cosmic*' | sort
   echo; echo "# Flatpak applets (remote cosmic)"
-  flatpak list --app --columns=application,version,origin | grep -i -E 'cosmic|applet' || true
+  flatpak list --app --columns=application,version,origin | grep -i -E 'cosmic|applet|gpu_screen_recorder' || true
   echo; echo "# Third-party themes in ~/.local/share/icons (not stored here; install.sh downloads them)"
   echo "MacTahoe, MacTahoe-dark, MacTahoe-light  https://github.com/vinceliuice/MacTahoe-icon-theme"
   echo "WhiteSur, WhiteSur-dark, WhiteSur-light   https://github.com/vinceliuice/WhiteSur-icon-theme"
