@@ -7,7 +7,7 @@ A macOS-style COSMIC desktop for Fedora. It survives COSMIC and Fedora updates w
 - **Gestures:** three-finger swipe between workspaces with a Mac-like glide. Each maximized app gets its own space, like Mission Control.
 - **Top bar:** transparent Mac-style bar that recolors to match the wallpaper, with a Control Center (Wi-Fi, Bluetooth, Do Not Disturb, sound, brightness, power), a Mac battery item, and a Notification Center (clock, calendar, notifications).
 - **Dock and look:** floating glass dock, frosted glass theme, MacTahoe icons, WhiteSur cursor and the Inter font.
-- **Extras:** Super+Space opens app search, overview thumbnails are centered, and there are extra applets (system monitor, clipboard, caffeine).
+- **Extras:** Super+Space opens app search, overview thumbnails are centered, and there are a Mac-style system monitor, clipboard and caffeine applets.
 
 ## Install on a new computer
 
@@ -88,6 +88,7 @@ Update the matching `patches/*.py` so it fits again, then run `~/.local/share/co
 
 ## Changing the setup
 
+- **Control Center → Edit Controls:** pick the left-most menu bar icon (or any icon name / image path), choose which system monitor values show in the bar, and open the widget settings.
 - **Your own tweaks:** change anything in COSMIC Settings as usual. Updates and rebuilds never touch your settings, so your changes are kept.
 - **Resetting the Mac look:** run `~/.local/share/cosmic-mac/apply-settings.sh` to apply the Mac defaults again (dock, top bar applets, glass theme, icons, shortcuts). You can edit the file first to change those defaults.
 - **Swipe feel:** edit `~/.config/cosmic-mac/animation.conf`, then log out and back in.

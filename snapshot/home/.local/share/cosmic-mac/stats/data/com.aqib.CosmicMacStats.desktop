@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=System Monitor (Mac)
+Comment=CPU, memory, network and disk in the top bar
+Type=Application
+Exec=cosmic-mac-stats
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;CPU;Memory;Monitor;
+Icon=utilities-system-monitor-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=End
+X-OverflowPriority=10

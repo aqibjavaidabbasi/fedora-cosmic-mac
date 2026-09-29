@@ -78,6 +78,7 @@ enum Page {
     Main,
     Wifi,
     Bluetooth,
+    Customize,
 }
 
 #[derive(Default)]
@@ -92,6 +93,9 @@ struct ControlCenter {
     bt: bt::State,
     show_nearby: bool,
     busy: Option<String>,
+    bar_icon: Option<String>,
+    custom_icon: String,
+    meters: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +126,11 @@ enum Message {
     Record { choose: bool },
     Open(&'static str),
     Overview,
+    SetBarIcon(Option<String>),
+    CustomIcon(String),
+    ApplyCustomIcon,
+    ToggleMeter(&'static str),
+    EditWidgets,
     Lock,
     LogOut,
     Restart,
@@ -378,6 +387,64 @@ fn pill<'a>(icon_name: &'static str, title: &'static str, subtitle: Option<Strin
         .into()
 }
 
+// ---------- "Edit Controls": customization written to config files ----------
+
+const BAR_ICONS: [(&str, &str); 6] = [
+    ("com.system76.CosmicAppLibrary", "Default"),
+    ("distributor-logo-fedora", "Fedora"),
+    ("distributor-logo-pop-os", "COSMIC"),
+    ("distributor-logo", "Linux"),
+    ("view-app-grid-symbolic", "Grid"),
+    ("start-here-symbolic", "Start"),
+];
+const METERS: [(&str, &str); 4] = [("cpu", "CPU"), ("memory", "Memory"), ("network", "Network"), ("disk", "Disk")];
+
+fn panel_button_conf() -> String {
+    format!("{}/.config/cosmic/com.system76.CosmicPanelButton/v1/configs", home())
+}
+
+fn stats_conf() -> String {
+    format!("{}/.config/cosmic-mac/stats.conf", home())
+}
+
+/// The left-most top-bar button's custom icon (App Library button).
+fn read_bar_icon() -> Option<String> {
+    let text = std::fs::read_to_string(panel_button_conf()).ok()?;
+    let line = text.lines().find(|l| l.contains("\"*/com.system76.CosmicAppLibrary\""))?;
+    let rest = line.split("icon: Some(\"").nth(1)?;
+    Some(rest.split('"').next()?.to_string())
+}
+
+fn write_bar_icon(icon: Option<&str>) {
+    let path = panel_button_conf();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|_| "{\n}".to_string());
+    let entry = match icon {
+        Some(i) => format!("    \"*/com.system76.CosmicAppLibrary\": (force_presentation: Some(Icon), icon: Some({i:?})),"),
+        None => "    \"*/com.system76.CosmicAppLibrary\": (force_presentation: Some(Icon)),".to_string(),
+    };
+    let mut lines: Vec<String> = text.lines().filter(|l| !l.contains("\"*/com.system76.CosmicAppLibrary\"")).map(str::to_string).collect();
+    let at = lines.iter().position(|l| l.trim() == "{").map_or(0, |i| i + 1);
+    lines.insert(at, entry);
+    let _ = std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap());
+    let _ = std::fs::write(&path, lines.join("\n"));
+}
+
+fn read_meters() -> Vec<String> {
+    std::fs::read_to_string(stats_conf())
+        .unwrap_or_default()
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("SHOW=").map(|v| v.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect()))
+        .unwrap_or_else(|| vec!["cpu".into(), "memory".into()])
+}
+
+fn write_meters(list: &[String]) {
+    let _ = std::fs::create_dir_all(format!("{}/.config/cosmic-mac", home()));
+    let _ = std::fs::write(
+        stats_conf(),
+        format!("# Meters shown in the top bar, left to right: cpu, memory, network, disk\nSHOW={}\n", list.join(",")),
+    );
+}
+
 /// Wi-Fi/Bluetooth pill, like macOS: the round chip toggles, the rest opens the menu.
 fn split_pill<'a>(icon_name: &'static str, title: &'static str, subtitle: String, on: bool, toggle: Message, open: Message) -> Element<'a, Message> {
     let chip = button::custom(chip_icon(icon_name, on)).class(Button::Text).padding(0).on_press(toggle);
@@ -424,9 +491,76 @@ fn circle_pair<'a>(a: Element<'a, Message>, b: Element<'a, Message>) -> Element<
 }
 
 impl ControlCenter {
+    fn customize_view(&self) -> Element<'_, Message> {
+        let selected = self.bar_icon.clone().unwrap_or_else(|| BAR_ICONS[0].0.to_string());
+        let mut icons = Row::new().spacing(8);
+        for (name, label) in BAR_ICONS {
+            let symbolic = name.ends_with("-symbolic");
+            let b = button::custom(
+                Column::new()
+                    .push(icon::from_name(name).size(26).symbolic(symbolic))
+                    .push(text::caption(label).size(10))
+                    .align_x(Alignment::Center)
+                    .spacing(2),
+            )
+            .class(tile_button(12.0, selected == name))
+            .padding([6, 4])
+            .width(Length::Fill)
+            .on_press(Message::SetBarIcon(Some(name.to_string())));
+            icons = icons.push(b);
+        }
+        let custom = row![
+            cosmic::widget::text_input("Icon name or /path/to/image.svg", self.custom_icon.clone())
+                .on_input(Message::CustomIcon)
+                .on_submit(|_| Message::ApplyCustomIcon)
+                .width(Length::Fill),
+            button::custom(text::body("Use")).class(tile_button(999.0, false)).padding([5, 12]).on_press(Message::ApplyCustomIcon),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let mut meters = Column::new().spacing(4);
+        for (key, label) in METERS {
+            let on = self.meters.iter().any(|m| m == key);
+            meters = meters.push(
+                row![text::body(label).width(Length::Fill), cosmic::widget::toggler(on).on_toggle(move |_| Message::ToggleMeter(key))]
+                    .align_y(Alignment::Center),
+            );
+        }
+
+        let card = |c: Element<'static, Message>| container(c).padding([10, 14]).width(Length::Fill).class(card_class());
+        let content = Column::new()
+            .push(
+                row![
+                    button::custom(icon::from_name("go-previous-symbolic").size(16).symbolic(true))
+                        .class(Button::Icon)
+                        .padding(2)
+                        .on_press(Message::ShowPage(Page::Main)),
+                    text::heading("Edit Controls").size(15),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .push(style::section("Menu Bar Icon"))
+            .push(card(Column::new().push(icons).push(custom).spacing(10).into()))
+            .push(style::section("System Monitor in Menu Bar"))
+            .push(card(meters.into()))
+            .push(style::section("Widgets"))
+            .push(
+                row![
+                    button::custom(text::body("Edit Widgets…")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::EditWidgets),
+                    button::custom(text::body("COSMIC Settings…")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::Open("desktop")),
+                ]
+                .spacing(8),
+            )
+            .spacing(10)
+            .padding(PAD);
+        style::popover(content, WIDTH)
+    }
+
     fn refresh_page(&self, rescan: bool) -> app::Task<Message> {
         match self.page {
-            Page::Main => Task::none(),
+            Page::Main | Page::Customize => Task::none(),
             Page::Wifi => {
                 let known = (!rescan).then(|| self.wifi.known_ssids());
                 cosmic::task::future(async move { cosmic::Action::App(Message::WifiState(net::gather(rescan, known).await)) })
@@ -548,13 +682,13 @@ impl cosmic::Application for ControlCenter {
                     let target = match page.trim() {
                         "wifi" => Page::Wifi,
                         "bluetooth" => Page::Bluetooth,
+                        "customize" => Page::Customize,
                         _ => Page::Main,
                     };
                     let opening = self.popup.is_none();
                     let toggle = self.update(Message::TogglePopup);
                     if opening && target != Page::Main {
-                        self.page = target;
-                        return Task::batch([toggle, self.refresh_page(true)]);
+                        return Task::batch([toggle, self.update(Message::ShowPage(target))]);
                     }
                     return toggle;
                 }
@@ -567,6 +701,11 @@ impl cosmic::Application for ControlCenter {
             }
             Message::Refreshed(status) => self.status = status,
             Message::ShowPage(page) => {
+                if page == Page::Customize {
+                    self.bar_icon = read_bar_icon();
+                    self.custom_icon = self.bar_icon.clone().filter(|i| !BAR_ICONS.iter().any(|(k, _)| k == i)).unwrap_or_default();
+                    self.meters = read_meters();
+                }
                 self.page = page;
                 self.show_other = false;
                 self.show_nearby = false;
@@ -735,6 +874,35 @@ impl cosmic::Application for ControlCenter {
                 run("cosmic-settings", &[page]);
                 return self.close_popup();
             }
+            Message::SetBarIcon(icon) => {
+                write_bar_icon(icon.as_deref().filter(|i| *i != BAR_ICONS[0].0));
+                self.bar_icon = icon;
+            }
+            Message::CustomIcon(v) => self.custom_icon = v,
+            Message::ApplyCustomIcon => {
+                let v = self.custom_icon.trim().to_string();
+                if !v.is_empty() {
+                    return self.update(Message::SetBarIcon(Some(v)));
+                }
+            }
+            Message::ToggleMeter(m) => {
+                if let Some(i) = self.meters.iter().position(|x| x == m) {
+                    if self.meters.len() > 1 {
+                        self.meters.remove(i);
+                    }
+                } else {
+                    // keep the canonical left-to-right order
+                    let mut next: Vec<String> = METERS.iter().map(|(k, _)| k.to_string()).filter(|k| k == m || self.meters.contains(k)).collect();
+                    next.dedup();
+                    self.meters = next;
+                }
+                write_meters(&self.meters);
+            }
+            Message::EditWidgets => {
+                let path = format!("{}/.config/cosmic-mac/widgets.conf", home());
+                run("cosmic-edit", &[&path]);
+                return self.close_popup();
+            }
             Message::Overview => {
                 run("cosmic-workspaces", &[]);
                 return self.close_popup();
@@ -797,6 +965,7 @@ impl cosmic::Application for ControlCenter {
                 );
                 return style::popover(Column::new().push(menu).padding([10, 0]), WIDTH);
             }
+            Page::Customize => return self.customize_view(),
             Page::Main => {}
         }
         let s = &self.status;
@@ -888,7 +1057,7 @@ impl cosmic::Application for ControlCenter {
             .push(power("system-reboot-symbolic", Message::Restart))
             .push(power("system-shutdown-symbolic", Message::ShutDown))
             .push(space::horizontal())
-            .push(button::custom(text::body("Edit Controls")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::Open("desktop")))
+            .push(button::custom(text::body("Edit Controls")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::ShowPage(Page::Customize)))
             .spacing(8)
             .align_y(Alignment::Center);
 

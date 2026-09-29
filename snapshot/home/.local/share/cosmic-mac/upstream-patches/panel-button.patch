@@ -1,5 +1,33 @@
+diff --git a/cosmic-panel-button/src/config.rs b/cosmic-panel-button/src/config.rs
+index 591fbf3..a45cb85 100644
+--- a/cosmic-panel-button/src/config.rs
++++ b/cosmic-panel-button/src/config.rs
+@@ -19,12 +19,14 @@ impl Default for CosmicPanelButtonConfig {
+                     "Panel".to_string(),
+                     IndividualConfig {
+                         force_presentation: None,
++                        icon: None,
+                     },
+                 ),
+                 (
+                     "Dock".to_string(),
+                     IndividualConfig {
+                         force_presentation: Some(Override::Icon),
++                        icon: None,
+                     },
+                 ),
+             ]),
+@@ -35,6 +37,8 @@ impl Default for CosmicPanelButtonConfig {
+ #[derive(Debug, Deserialize, Serialize, PartialEq, Default, Clone)]
+ pub struct IndividualConfig {
+     pub force_presentation: Option<Override>,
++    #[serde(default)]
++    pub icon: Option<String>,
+ }
+ 
+ #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 diff --git a/cosmic-panel-button/src/lib.rs b/cosmic-panel-button/src/lib.rs
-index fe411f8..6101a90 100644
+index fe411f8..003d50f 100644
 --- a/cosmic-panel-button/src/lib.rs
 +++ b/cosmic-panel-button/src/lib.rs
 @@ -20,6 +20,19 @@ use std::{env, fs, process::Command, sync::LazyLock};
@@ -46,3 +74,25 @@ index fe411f8..6101a90 100644
              }
              Msg::Surface(a) => {
                  return cosmic::task::message(cosmic::Action::Cosmic(
+@@ -154,7 +161,7 @@ impl cosmic::Application for Button {
+         // override for icon, later if text is updated to wrap, we may
+         // use Override::Text to override this behavior
+         autosize::autosize(
+-            if self.desktop.icon.is_some()
++            if (self.desktop.icon.is_some() || self.config.icon.is_some())
+                 && matches!(
+                     self.core.applet.anchor,
+                     PanelAnchor::Left | PanelAnchor::Right
+@@ -171,8 +178,10 @@ impl cosmic::Application for Button {
+                 cosmic::Element::from(
+                     self.core.applet.applet_tooltip::<Msg>(
+                         self.icon_button_from_handle(
+-                            cosmic::widget::icon::from_name(self.desktop.icon.clone().unwrap())
+-                                .handle(),
++                            match self.config.icon.clone().or_else(|| self.desktop.icon.clone()).unwrap_or_default() {
++                                i if i.starts_with('/') => cosmic::widget::icon::from_path(i.into()),
++                                i => cosmic::widget::icon::from_name(i).handle(),
++                            },
+                         )
+                         .on_press_down(Msg::Press),
+                         self.desktop.name.clone(),

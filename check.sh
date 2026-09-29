@@ -20,7 +20,7 @@ cosmic-workspaces cosmic-workspaces-built-version cosmic-workspaces Centered ove
 EOF
 
 echo "Helper apps:"
-for b in cosmic-mac-control-center cosmic-mac-battery cosmic-mac-wifi cosmic-mac-bluetooth cosmic-maximize-to-workspace; do
+for b in cosmic-mac-control-center cosmic-mac-battery cosmic-mac-wifi cosmic-mac-bluetooth cosmic-mac-stats cosmic-maximize-to-workspace; do
     f=$HOME/.local/bin/$b
     if [ ! -x "$f" ]; then warn "$b missing -> run $D/rebuild.sh"
     elif ldd "$f" 2>/dev/null | grep -q "not found"; then warn "$b needs a rebuild -> run $D/rebuild.sh --force"
