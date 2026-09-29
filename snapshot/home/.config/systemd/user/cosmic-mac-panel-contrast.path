@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the COSMIC wallpaper setting
+
+[Path]
+PathChanged=%h/.config/cosmic/com.system76.CosmicBackground/v1
+PathModified=%h/.config/cosmic/com.system76.CosmicBackground/v1
+
+[Install]
+WantedBy=default.target

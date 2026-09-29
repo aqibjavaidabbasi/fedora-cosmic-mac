@@ -1,0 +1,4 @@
+{
+    "*/com.system76.CosmicAppLibrary": (force_presentation: Some(Icon)),
+    "Dock": (force_presentation: Some(Icon)),
+}

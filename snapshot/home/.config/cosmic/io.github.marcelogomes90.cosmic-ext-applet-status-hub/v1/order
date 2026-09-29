@@ -1,0 +1,18 @@
+[
+    (
+        id: "ulauncher",
+        dup: 0,
+    ),
+    (
+        id: "easyeffects",
+        dup: 0,
+    ),
+    (
+        id: "Claude_status_icon_1",
+        dup: 0,
+    ),
+    (
+        id: "Slack_status_icon_1",
+        dup: 0,
+    ),
+]

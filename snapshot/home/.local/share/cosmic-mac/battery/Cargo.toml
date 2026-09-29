@@ -1,0 +1,21 @@
+[package]
+name = "cosmic-mac-battery"
+version = "0.1.0"
+edition = "2024"
+description = "macOS-style battery percentage + Battery popover for the COSMIC panel"
+license = "GPL-3.0-only"
+
+[dependencies]
+libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "d4d71fd53e5ed6bd3a430089114dffa2da3cd498", default-features = false, features = [
+    "applet",
+    "multi-window",
+    "tokio",
+    "wayland",
+] }
+tokio = { version = "1", features = ["macros", "time"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+futures = "0.3"
+
+[profile.release]
+lto = "thin"
+strip = true

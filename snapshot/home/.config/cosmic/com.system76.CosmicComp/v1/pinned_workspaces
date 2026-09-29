@@ -1,0 +1,34 @@
+[
+    (
+        output: (
+            name: "eDP-1",
+            edid: Some((
+                manufacturer: ('S', 'H', 'P'),
+                product: 5300,
+                serial: Some(1188768),
+                manufacture_week: 5,
+                manufacture_year: 2019,
+                model_year: None,
+            )),
+        ),
+        tiling_enabled: false,
+        id: Some("5ea2ef"),
+        name: None,
+    ),
+    (
+        output: (
+            name: "DP-1",
+            edid: Some((
+                manufacturer: ('S', 'A', 'M'),
+                product: 28781,
+                serial: Some(809714484),
+                manufacture_week: 0,
+                manufacture_year: 0,
+                model_year: Some(2245),
+            )),
+        ),
+        tiling_enabled: false,
+        id: Some("aaae2f"),
+        name: None,
+    ),
+]

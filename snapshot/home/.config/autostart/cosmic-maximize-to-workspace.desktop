@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Maximize to Workspace
+Comment=Maximized and fullscreen windows get their own workspace (macOS-like)
+Exec=/home/aqibj/.local/bin/cosmic-maximize-to-workspace
+OnlyShowIn=COSMIC;
+X-GNOME-Autostart-enabled=false
+NoDisplay=true

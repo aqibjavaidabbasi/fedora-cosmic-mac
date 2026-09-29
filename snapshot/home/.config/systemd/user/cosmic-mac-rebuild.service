@@ -1,0 +1,7 @@
+[Unit]
+Description=Rebuild COSMIC Mac customizations if COSMIC was updated
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/cosmic-mac/rebuild.sh
+Nice=19

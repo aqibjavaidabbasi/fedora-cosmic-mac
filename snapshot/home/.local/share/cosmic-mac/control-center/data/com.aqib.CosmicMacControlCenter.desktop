@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Control Center
+Comment=Wi-Fi, Bluetooth, Do Not Disturb, sound, brightness, battery and power in one place
+Type=Application
+Exec=cosmic-mac-control-center
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Control;Center;Wi-Fi;Bluetooth;Sound;Brightness;
+Icon=preferences-system-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=End
+X-OverflowPriority=10

@@ -1,0 +1,12 @@
+[package]
+name = "cosmic-maximize-to-workspace"
+version = "0.1.0"
+edition = "2024"
+description = "macOS-like: maximized/fullscreen windows get their own workspace on COSMIC"
+
+[dependencies]
+cosmic-client-toolkit = { git = "https://github.com/pop-os/cosmic-protocols", rev = "32283d76a8d0342da74c4cc022a533c52dcf378f" }
+
+[profile.release]
+lto = true
+strip = true
