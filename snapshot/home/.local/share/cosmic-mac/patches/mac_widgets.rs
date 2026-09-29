@@ -1,0 +1,665 @@
+//! macOS Tahoe Notification Center widgets for COSMIC's notifications applet.
+//! Copied into cosmic-applet-notifications/src by patches/notifications.py.
+//!
+//!   [ Calendar ] [ Weather ]
+//!   [      World Clock     ]
+//!   [        Stocks        ]
+//!   [      Screen Time     ]
+//!                  (Edit Widgets) (x)
+//!
+//! Settings: ~/.config/cosmic-mac/widgets.conf (created on first run, "Edit Widgets" opens it).
+//! Data: Open-Meteo (weather, no key), ip-api.com (location when CITY=auto), Yahoo Finance
+//! chart API (quotes, no key), and .ics calendars under ~/.local/share/evolution/calendar.
+
+use std::time::{Duration, Instant};
+
+use cosmic::{
+    Element,
+    iced::{Alignment, Background, Border, Color, Length, Subscription, gradient::Linear, Radians, time},
+    theme,
+    widget::{Column, button, container, icon, row, space, svg, text},
+};
+
+const W: f32 = 336.0; // content width inside the 360px popup
+const GAP: f32 = 12.0;
+const SMALL: f32 = (W - GAP) / 2.0;
+const RADIUS: f32 = 22.0;
+const RED: Color = Color::from_rgb(1.0, 0.231, 0.188); // #FF3B30
+const GREEN: Color = Color::from_rgb(0.204, 0.78, 0.349); // #34C759
+
+#[derive(Clone, Debug)]
+pub enum Msg {
+    Tick,
+    CheckOpen,
+    Weather(Option<Weather>),
+    Quotes(Vec<Quote>),
+    Events(Vec<Event>),
+    Edit,
+    Close,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Weather {
+    city: String,
+    temp: f64,
+    high: f64,
+    low: f64,
+    code: u32,
+    is_day: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct Quote {
+    label: String,
+    price: f64,
+    change: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct Event {
+    title: String,
+    start: String, // "2–11:30 AM" style
+}
+
+#[derive(Clone, Debug)]
+struct Settings {
+    city: String,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    fahrenheit: bool,
+    clocks: Vec<(String, String)>, // (tz, label)
+    stocks: Vec<(String, String)>, // (symbol, label)
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        let pair = |s: &str| {
+            s.split(',')
+                .filter_map(|p| {
+                    let (a, b) = p.split_once(':').unwrap_or((p, p));
+                    (!a.trim().is_empty()).then(|| (a.trim().to_string(), b.trim().to_string()))
+                })
+                .collect()
+        };
+        Self {
+            city: "auto".into(),
+            lat: None,
+            lon: None,
+            fahrenheit: false,
+            clocks: pair(DEFAULT_CLOCKS),
+            stocks: pair(DEFAULT_STOCKS),
+        }
+    }
+}
+
+const DEFAULT_CLOCKS: &str = "America/Los_Angeles:Cupertino,Asia/Tokyo:Tokyo,Australia/Sydney:Sydney,Europe/Paris:Paris";
+const DEFAULT_STOCKS: &str = "^IXIC:NASDAQ,^NYA:NYSE,^DJI:Dow Jones,AAPL:AAPL,SBUX:SBUX,NKE:NKE";
+
+fn conf_path() -> String {
+    format!("{}/.config/cosmic-mac/widgets.conf", std::env::var("HOME").unwrap_or_default())
+}
+
+fn load_settings() -> Settings {
+    let path = conf_path();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        let _ = std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap());
+        let _ = std::fs::write(
+            &path,
+            format!(
+                "# macOS-style widgets in the clock's Notification Center.\n\
+                 # CITY=auto uses your IP location; or set CITY plus LAT/LON.\n\
+                 CITY=auto\n#LAT=33.72\n#LON=73.04\nUNITS=C\n\
+                 # timezone:label, comma separated\nCLOCKS={DEFAULT_CLOCKS}\n\
+                 # Yahoo Finance symbol:label, comma separated (6 fit)\nSTOCKS={DEFAULT_STOCKS}\n"
+            ),
+        );
+        return Settings::default();
+    };
+    let mut s = Settings::default();
+    for line in text.lines() {
+        let Some((k, v)) = line.split_once('=') else { continue };
+        if k.trim_start().starts_with('#') {
+            continue;
+        }
+        let v = v.trim();
+        match k.trim() {
+            "CITY" => s.city = v.to_string(),
+            "LAT" => s.lat = v.parse().ok(),
+            "LON" => s.lon = v.parse().ok(),
+            "UNITS" => s.fahrenheit = v.eq_ignore_ascii_case("F"),
+            "CLOCKS" | "STOCKS" => {
+                let list: Vec<(String, String)> = v
+                    .split(',')
+                    .filter_map(|p| {
+                        let (a, b) = p.split_once(':').unwrap_or((p, p));
+                        (!a.trim().is_empty()).then(|| (a.trim().to_string(), b.trim().to_string()))
+                    })
+                    .collect();
+                if k.trim() == "CLOCKS" { s.clocks = list } else { s.stocks = list }
+            }
+            _ => {}
+        }
+    }
+    s
+}
+
+pub struct Widgets {
+    settings: Settings,
+    weather: Option<Weather>,
+    quotes: Vec<Quote>,
+    events: Vec<Event>,
+    weather_at: Option<Instant>,
+    quotes_at: Option<Instant>,
+    events_at: Option<Instant>,
+}
+
+impl Default for Widgets {
+    fn default() -> Self {
+        Self {
+            settings: load_settings(),
+            weather: None,
+            quotes: Vec::new(),
+            events: Vec::new(),
+            weather_at: None,
+            quotes_at: None,
+            events_at: None,
+        }
+    }
+}
+
+fn stale(t: Option<Instant>, every: Duration) -> bool {
+    t.is_none_or(|t| t.elapsed() >= every)
+}
+
+async fn curl(url: String) -> Option<serde_json::Value> {
+    let out = tokio::process::Command::new("curl")
+        .args(["-s", "-m", "10", "-A", "Mozilla/5.0", &url])
+        .output()
+        .await
+        .ok()?;
+    serde_json::from_slice(&out.stdout).ok()
+}
+
+async fn fetch_weather(s: Settings) -> Option<Weather> {
+    let (city, lat, lon) = match (s.lat, s.lon) {
+        (Some(lat), Some(lon)) if s.city != "auto" => (s.city.clone(), lat, lon),
+        _ => {
+            let v = curl("http://ip-api.com/json/?fields=city,lat,lon".into()).await?;
+            (v["city"].as_str()?.to_string(), v["lat"].as_f64()?, v["lon"].as_f64()?)
+        }
+    };
+    let unit = if s.fahrenheit { "&temperature_unit=fahrenheit" } else { "" };
+    let v = curl(format!(
+        "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}\
+         &current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min\
+         &timezone=auto&forecast_days=1{unit}"
+    ))
+    .await?;
+    Some(Weather {
+        city,
+        temp: v["current"]["temperature_2m"].as_f64()?,
+        code: v["current"]["weather_code"].as_u64()? as u32,
+        is_day: v["current"]["is_day"].as_u64() == Some(1),
+        high: v["daily"]["temperature_2m_max"][0].as_f64()?,
+        low: v["daily"]["temperature_2m_min"][0].as_f64()?,
+    })
+}
+
+async fn fetch_quotes(list: Vec<(String, String)>) -> Vec<Quote> {
+    let mut out = Vec::new();
+    for (sym, label) in list.into_iter().take(6) {
+        let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{}?range=1d&interval=1d", sym.replace('^', "%5E"));
+        if let Some(v) = curl(url).await {
+            let m = &v["chart"]["result"][0]["meta"];
+            if let Some(price) = m["regularMarketPrice"].as_f64() {
+                let prev = m["chartPreviousClose"].as_f64().or(m["previousClose"].as_f64()).unwrap_or(price);
+                out.push(Quote { label, price, change: price - prev });
+            }
+        }
+    }
+    out
+}
+
+/// Today's events from local .ics calendars (single, non-recurring events).
+fn read_events() -> Vec<Event> {
+    let today = jiff::Zoned::now().date();
+    let dir = format!("{}/.local/share/evolution/calendar", std::env::var("HOME").unwrap_or_default());
+    let mut events: Vec<(jiff::civil::DateTime, Event)> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    for e in entries.flatten() {
+        let Ok(ics) = std::fs::read_to_string(e.path().join("calendar.ics")) else { continue };
+        for block in ics.split("BEGIN:VEVENT").skip(1) {
+            let mut title = String::new();
+            let mut start = None;
+            let mut end = None;
+            for line in block.lines() {
+                let (key, val) = match line.split_once(':') {
+                    Some(kv) => kv,
+                    None => continue,
+                };
+                let parse = |v: &str| {
+                    let v = v.trim().trim_end_matches('Z');
+                    jiff::civil::DateTime::strptime("%Y%m%dT%H%M%S", v)
+                        .ok()
+                        .or_else(|| jiff::civil::Date::strptime("%Y%m%d", v).ok().map(|d| d.at(0, 0, 0, 0)))
+                };
+                if key.starts_with("SUMMARY") {
+                    title = val.trim().to_string();
+                } else if key.starts_with("DTSTART") {
+                    start = parse(val);
+                } else if key.starts_with("DTEND") {
+                    end = parse(val);
+                }
+            }
+            if let Some(s) = start.filter(|s| s.date() == today) {
+                let fmt = |d: jiff::civil::DateTime| d.strftime("%-I:%M %p").to_string();
+                let when = match end {
+                    Some(e) => format!("{}–{}", fmt(s).trim_end_matches(" AM").trim_end_matches(" PM"), fmt(e)),
+                    None => fmt(s),
+                };
+                events.push((s, Event { title, start: when }));
+            }
+        }
+    }
+    events.sort_by_key(|(s, _)| *s);
+    events.into_iter().map(|(_, e)| e).collect()
+}
+
+fn weather_look(code: u32, day: bool) -> (&'static str, &'static str) {
+    let n = |d: &'static str, n: &'static str| if day { d } else { n };
+    match code {
+        0 => (n("weather-clear-symbolic", "weather-clear-night-symbolic"), "Clear"),
+        1 => (n("weather-few-clouds-symbolic", "weather-few-clouds-night-symbolic"), "Mostly Clear"),
+        2 => (n("weather-few-clouds-symbolic", "weather-few-clouds-night-symbolic"), "Partly Cloudy"),
+        3 => ("weather-overcast-symbolic", "Cloudy"),
+        45 | 48 => ("weather-fog-symbolic", "Fog"),
+        51..=57 => ("weather-showers-scattered-symbolic", "Drizzle"),
+        61..=67 => ("weather-showers-symbolic", "Rain"),
+        71..=77 | 85 | 86 => ("weather-snow-symbolic", "Snow"),
+        80..=82 => ("weather-showers-symbolic", "Showers"),
+        95..=99 => ("weather-storm-symbolic", "Thunderstorms"),
+        _ => ("weather-overcast-symbolic", "—"),
+    }
+}
+
+fn fixed(c: Color) -> theme::Text {
+    theme::Text::Color(c)
+}
+
+fn alpha(c: Color, a: f32) -> Color {
+    Color { a, ..c }
+}
+
+fn card(background: Background) -> theme::Container<'static> {
+    theme::Container::custom(move |_| cosmic::iced::widget::container::Style {
+        background: Some(background),
+        border: Border { radius: RADIUS.into(), ..Default::default() },
+        ..Default::default()
+    })
+}
+
+fn glass() -> theme::Container<'static> {
+    theme::Container::custom(|t| cosmic::iced::widget::container::Style {
+        background: Some(Background::Color(if t.cosmic().is_dark {
+            Color::from_rgba(0.12, 0.12, 0.13, 0.78)
+        } else {
+            Color::from_rgba(1.0, 1.0, 1.0, 0.82)
+        })),
+        border: Border { radius: RADIUS.into(), ..Default::default() },
+        ..Default::default()
+    })
+}
+
+fn on_glass(t: &cosmic::Theme) -> Color {
+    if t.cosmic().is_dark { Color::WHITE } else { Color::BLACK }
+}
+
+fn dim_style(t: &cosmic::Theme) -> cosmic::iced::widget::text::Style {
+    cosmic::iced::widget::text::Style { color: Some(alpha(on_glass(t), 0.55)), ..Default::default() }
+}
+
+fn strong_style(t: &cosmic::Theme) -> cosmic::iced::widget::text::Style {
+    cosmic::iced::widget::text::Style { color: Some(on_glass(t)), ..Default::default() }
+}
+
+/// An analog clock face as SVG. Day faces are white, night faces dark, like macOS.
+fn clock_svg(h: i8, m: i8, s: i8, day: bool) -> Vec<u8> {
+    let (face, ink) = if day { ("#FFFFFF", "#000000") } else { ("#1C1C1E", "#FFFFFF") };
+    let mut out = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="49" fill="{face}"/>"#
+    );
+    for i in 1..=12 {
+        let a = (i as f32) * 30f32.to_radians();
+        let (x, y) = (50.0 + 38.0 * a.sin(), 50.0 - 38.0 * a.cos() + 5.0);
+        out += &format!(
+            r#"<text x="{x:.1}" y="{y:.1}" font-family="Inter, sans-serif" font-size="13" font-weight="500" fill="{ink}" text-anchor="middle">{i}</text>"#
+        );
+    }
+    let hand = |deg: f32, len: f32, width: f32, color: &str| {
+        let a = deg.to_radians();
+        format!(
+            r#"<line x1="50" y1="50" x2="{:.1}" y2="{:.1}" stroke="{color}" stroke-width="{width}" stroke-linecap="round"/>"#,
+            50.0 + len * a.sin(),
+            50.0 - len * a.cos()
+        )
+    };
+    let (h, m, s) = (h as f32, m as f32, s as f32);
+    out += &hand((h % 12.0) * 30.0 + m * 0.5, 22.0, 4.0, ink);
+    out += &hand(m * 6.0 + s * 0.1, 34.0, 3.0, ink);
+    out += &hand(s * 6.0, 38.0, 1.2, "#FF9500");
+    out += r##"<circle cx="50" cy="50" r="2.6" fill="#FF9500"/></svg>"##;
+    out.into_bytes()
+}
+
+impl Widgets {
+    pub fn subscription(&self) -> Subscription<Msg> {
+        Subscription::batch([
+            time::every(Duration::from_secs(5)).map(|_| Msg::Tick),
+            time::every(Duration::from_millis(500)).map(|_| Msg::CheckOpen),
+        ])
+    }
+
+    pub fn update(&mut self, msg: Msg) -> cosmic::iced::Task<Msg> {
+        match msg {
+            Msg::Tick => {
+                let mut tasks = Vec::new();
+                if stale(self.weather_at, Duration::from_secs(900)) {
+                    self.weather_at = Some(Instant::now());
+                    let s = self.settings.clone();
+                    tasks.push(cosmic::iced::Task::perform(fetch_weather(s), Msg::Weather));
+                }
+                if stale(self.quotes_at, Duration::from_secs(300)) {
+                    self.quotes_at = Some(Instant::now());
+                    let list = self.settings.stocks.clone();
+                    tasks.push(cosmic::iced::Task::perform(fetch_quotes(list), Msg::Quotes));
+                }
+                if stale(self.events_at, Duration::from_secs(120)) {
+                    self.events_at = Some(Instant::now());
+                    self.settings = load_settings();
+                    tasks.push(cosmic::iced::Task::perform(async { read_events() }, Msg::Events));
+                }
+                return cosmic::iced::Task::batch(tasks);
+            }
+            Msg::Weather(w) => {
+                if w.is_some() {
+                    self.weather = w;
+                } else {
+                    self.weather_at = None; // retry on the next tick
+                }
+            }
+            Msg::Quotes(q) => {
+                if !q.is_empty() {
+                    self.quotes = q;
+                }
+            }
+            Msg::Events(e) => self.events = e,
+            Msg::Edit => {
+                let _ = load_settings(); // make sure the file exists
+                let path = conf_path();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("cosmic-edit").arg(path).status();
+                });
+                self.weather_at = None;
+                self.quotes_at = None;
+                self.events_at = None;
+            }
+            Msg::CheckOpen => {
+                // `touch $XDG_RUNTIME_DIR/cosmic-mac/open/com.system76.CosmicAppletNotifications`
+                // toggles the popover (scripts, keyboard shortcuts).
+                let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+                if std::fs::remove_file(format!("{dir}/cosmic-mac/open/com.system76.CosmicAppletNotifications")).is_ok() {
+                    return cosmic::iced::Task::done(Msg::Close);
+                }
+            }
+            Msg::Close => {}
+        }
+        cosmic::iced::Task::none()
+    }
+
+    fn calendar(&self, now: &jiff::Zoned) -> Element<'_, Msg> {
+        let mut col = Column::new()
+            .push(text::heading(now.strftime("%A").to_string().to_uppercase()).size(11).class(fixed(RED)))
+            .push(text::title2(now.day().to_string()).size(32).class(theme::Text::Custom(strong_style)))
+            .spacing(2);
+        match self.events.first() {
+            Some(e) => {
+                let bar = container(space::vertical().height(Length::Fixed(28.0)))
+                    .width(Length::Fixed(3.0))
+                    .class(card(Background::Color(RED)));
+                col = col.push(space::vertical().height(Length::Fixed(4.0))).push(
+                    container(
+                        row![
+                            bar,
+                            Column::new()
+                                .push(text::heading(e.title.clone()).size(11).class(fixed(RED)))
+                                .push(text::caption(e.start.clone()).size(10).class(fixed(alpha(RED, 0.85)))),
+                        ]
+                        .spacing(6),
+                    )
+                    .padding([3, 4])
+                    .width(Length::Fill)
+                    .class(card(Background::Color(alpha(RED, 0.14)))),
+                );
+                if self.events.len() > 1 {
+                    let more = self.events.len() - 1;
+                    col = col.push(
+                        text::caption(format!("{more} more event{}", if more == 1 { "" } else { "s" }))
+                            .size(11)
+                            .class(theme::Text::Custom(dim_style)),
+                    );
+                }
+            }
+            None => {
+                col = col
+                    .push(space::vertical().height(Length::Fill))
+                    .push(text::caption("No events today").size(11).class(theme::Text::Custom(dim_style)));
+            }
+        }
+        container(col).padding(14).width(Length::Fixed(SMALL)).height(Length::Fixed(SMALL)).class(glass()).into()
+    }
+
+    fn weather(&self) -> Element<'_, Msg> {
+        let white = |a: f32| fixed(alpha(Color::WHITE, a));
+        let (bg, content): (Background, Element<'_, Msg>) = match &self.weather {
+            Some(w) => {
+                let (glyph, label) = weather_look(w.code, w.is_day);
+                let grad = if w.is_day {
+                    Linear::new(Radians(std::f32::consts::PI))
+                        .add_stop(0.0, Color::from_rgb8(0x4A, 0x90, 0xE2))
+                        .add_stop(1.0, Color::from_rgb8(0x2B, 0x6C, 0xC4))
+                } else {
+                    Linear::new(Radians(std::f32::consts::PI))
+                        .add_stop(0.0, Color::from_rgb8(0x1D, 0x27, 0x3F))
+                        .add_stop(1.0, Color::from_rgb8(0x3A, 0x4A, 0x6E))
+                };
+                let deg = |v: f64| format!("{}°", v.round() as i64);
+                (
+                    Background::Gradient(grad.into()),
+                    Column::new()
+                        .push(
+                            row![
+                                text::heading(w.city.clone()).size(14).class(white(1.0)),
+                                icon::from_name("mark-location-symbolic").size(11).symbolic(true),
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center),
+                        )
+                        .push(text::title1(deg(w.temp)).size(40).class(white(1.0)))
+                        .push(space::vertical().height(Length::Fill))
+                        .push(icon::from_name(glyph).size(16).symbolic(true))
+                        .push(text::heading(label).size(13).class(white(1.0)))
+                        .push(text::heading(format!("H:{} L:{}", deg(w.high), deg(w.low))).size(13).class(white(1.0)))
+                        .spacing(1)
+                        .into(),
+                )
+            }
+            None => (
+                Background::Color(Color::from_rgb8(0x2B, 0x6C, 0xC4)),
+                Column::new()
+                    .push(text::heading("Weather").size(14).class(white(1.0)))
+                    .push(space::vertical().height(Length::Fill))
+                    .push(text::caption("Loading…").class(white(0.8)))
+                    .into(),
+            ),
+        };
+        container(content)
+            .padding(14)
+            .width(Length::Fixed(SMALL))
+            .height(Length::Fixed(SMALL))
+            .class(theme::Container::custom(move |_| cosmic::iced::widget::container::Style {
+                background: Some(bg),
+                border: Border { radius: RADIUS.into(), ..Default::default() },
+                icon_color: Some(Color::WHITE),
+                text_color: Some(Color::WHITE),
+                ..Default::default()
+            }))
+            .into()
+    }
+
+    fn world_clock(&self, now: &jiff::Zoned) -> Element<'_, Msg> {
+        let here = now.offset().seconds();
+        let today = now.date();
+        let mut clocks = row![].spacing(8);
+        for (tz, label) in self.settings.clocks.iter().take(4) {
+            let Ok(t) = now.in_tz(tz) else { continue };
+            let day = (6..18).contains(&t.hour());
+            let face = svg(svg::Handle::from_memory(clock_svg(t.hour(), t.minute(), t.second(), day)))
+                .width(Length::Fixed(66.0))
+                .height(Length::Fixed(66.0));
+            let rel = match t.date().cmp(&today) {
+                std::cmp::Ordering::Less => "Yesterday",
+                std::cmp::Ordering::Equal => "Today",
+                std::cmp::Ordering::Greater => "Tomorrow",
+            };
+            let diff = (t.offset().seconds() - here) as f32 / 3600.0;
+            let diff = if diff.fract() == 0.0 { format!("{:+}HRS", diff as i32) } else { format!("{diff:+.1}HRS") };
+            clocks = clocks.push(
+                Column::new()
+                    .push(face)
+                    .push(text::heading(label.clone()).size(12).class(fixed(Color::WHITE)))
+                    .push(text::caption(rel).size(10).class(fixed(alpha(Color::WHITE, 0.6))))
+                    .push(text::caption(diff).size(10).class(fixed(alpha(Color::WHITE, 0.6))))
+                    .align_x(Alignment::Center)
+                    .width(Length::Fill),
+            );
+        }
+        container(clocks)
+            .padding([14, 12])
+            .width(Length::Fixed(W))
+            .class(card(Background::Color(Color::from_rgba(0.11, 0.11, 0.12, 0.92))))
+            .into()
+    }
+
+    fn stocks(&self) -> Element<'_, Msg> {
+        let line = |q: Option<&Quote>| -> Element<'_, Msg> {
+            let Some(q) = q else { return space::horizontal().into() };
+            let up = q.change >= 0.0;
+            let price = if q.price >= 1000.0 {
+                let whole = q.price.round() as i64;
+                let s = whole.to_string();
+                let mut out = String::new();
+                for (i, ch) in s.chars().enumerate() {
+                    if i > 0 && (s.len() - i) % 3 == 0 {
+                        out.push(',');
+                    }
+                    out.push(ch);
+                }
+                out
+            } else {
+                format!("{:.2}", q.price)
+            };
+            row![
+                text::heading(if up { "▲" } else { "▼" }).size(11).class(fixed(if up { GREEN } else { RED })),
+                text::heading(q.label.clone())
+                    .size(14)
+                    .wrapping(cosmic::iced::core::widget::text::Wrapping::None)
+                    .class(fixed(Color::WHITE))
+                    .width(Length::Fill),
+                text::heading(price).size(14).class(fixed(Color::WHITE)),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+        };
+        let q = &self.quotes;
+        let mut body = Column::new().spacing(6);
+        if q.is_empty() {
+            body = body.push(text::caption("Loading quotes…").class(fixed(alpha(Color::WHITE, 0.6))));
+        }
+        for i in 0..3 {
+            if i < q.len() {
+                body = body.push(row![line(q.get(i)), line(q.get(i + 3))].spacing(18));
+            }
+        }
+        body = body.push(space::vertical().height(Length::Fixed(4.0))).push(
+            text::caption("Quotes delayed · Yahoo Finance").size(11).class(fixed(alpha(Color::WHITE, 0.55))),
+        );
+        container(body)
+            .padding([14, 16])
+            .width(Length::Fixed(W))
+            .class(card(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.88))))
+            .into()
+    }
+
+    fn screen_time(&self) -> Element<'_, Msg> {
+        let dim = || theme::Text::Custom(dim_style);
+        let gridline = || {
+            container(space::horizontal().width(Length::Fill))
+                .height(Length::Fixed(1.0))
+                .width(Length::Fill)
+                .class(theme::Container::custom(|t| cosmic::iced::widget::container::Style {
+                    background: Some(Background::Color(alpha(on_glass(t), 0.12))),
+                    ..Default::default()
+                }))
+        };
+        let chart = Column::new()
+            .push(row![gridline(), text::caption("60m").size(10).class(dim())].spacing(6).align_y(Alignment::Center))
+            .push(space::vertical().height(Length::Fixed(22.0)))
+            .push(row![gridline(), text::caption("30m").size(10).class(dim())].spacing(6).align_y(Alignment::Center))
+            .push(space::vertical().height(Length::Fixed(22.0)))
+            .push(row![gridline(), text::caption("0").size(10).class(dim())].spacing(6).align_y(Alignment::Center))
+            .push(
+                row![
+                    text::caption("12 AM").size(10).class(dim()).width(Length::Fill),
+                    text::caption("6 AM").size(10).class(dim()).width(Length::Fill),
+                    text::caption("12 PM").size(10).class(dim()).width(Length::Fill),
+                ]
+                .padding([0, 24, 0, 0]),
+            );
+        container(
+            Column::new()
+                .push(text::caption("Screen Time isn't recording app activity yet.").size(11).class(dim()))
+                .push(chart)
+                .spacing(10),
+        )
+        .padding([14, 16])
+        .width(Length::Fixed(W))
+        .class(glass())
+        .into()
+    }
+
+    pub fn view(&self, now: &jiff::Zoned) -> Element<'_, Msg> {
+        let footer = row![
+            space::horizontal(),
+            button::custom(text::body("Edit Widgets")).class(cosmic::theme::Button::Standard).padding([5, 14]).on_press(Msg::Edit),
+            button::custom(icon::from_name("window-close-symbolic").size(12).symbolic(true))
+                .class(cosmic::theme::Button::Standard)
+                .padding(6)
+                .on_press(Msg::Close),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        container(
+            Column::new()
+                .push(row![self.calendar(now), self.weather()].spacing(GAP))
+                .push(self.world_clock(now))
+                .push(self.stocks())
+                .push(self.screen_time())
+                .push(footer)
+                .spacing(GAP),
+        )
+        .padding([6, 12])
+        .into()
+    }
+}

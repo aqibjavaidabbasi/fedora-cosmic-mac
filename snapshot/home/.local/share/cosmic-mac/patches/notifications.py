@@ -145,3 +145,39 @@ patch(L, [
      "\nstatic MAC_AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =\n"
      "    LazyLock::new(|| cosmic::widget::Id::new(\"mac-clock-autosize\"));\n\\1"),
 ])
+
+# ---------------------------------------------------------------------------
+# macOS Notification Center widgets (calendar, weather, world clock, stocks,
+# screen time) below the notifications. The widget code lives in
+# patches/mac_widgets.rs and is copied into the crate.
+import os, shutil
+shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "mac_widgets.rs"),
+            "cosmic-applet-notifications/src/mac_widgets.rs")
+
+patch("cosmic-applet-notifications/Cargo.toml", [
+    (r'(jiff = "0\.2"\n)', r'\1serde_json = "1"\n'),
+])
+
+patch(L, [
+    (r"(\nstatic MAC_AUTOSIZE_ID)", "\nmod mac_widgets;\n\\1"),
+    (r"(    military_time: bool,\n\})", "    military_time: bool,\n    mac_widgets: mac_widgets::Widgets,\n}"),
+    (r"(            \.is_ok_and\(\|v\| v\.trim\(\) == \"true\"\),\n        \};)",
+     "            .is_ok_and(|v| v.trim() == \"true\"),\n            mac_widgets: Default::default(),\n        };"),
+    (r"(    MacCalNext,\n)", "    MacCalNext,\n    MacWidgets(mac_widgets::Msg),\n"),
+    (r"(            cosmic::iced::time::every\(std::time::Duration::from_secs\(2\)\)\.map\(\|_\| Message::MacTick\),\n)",
+     "\\1            self.mac_widgets.subscription().map(Message::MacWidgets),\n"),
+    (r"(            Message::MacCalPrev => \{\n)",
+     "            Message::MacWidgets(mac_widgets::Msg::Close) => return self.update(Message::TogglePopup),\n"
+     "            Message::MacWidgets(m) => {\n"
+     "                return self.mac_widgets.update(m).map(|m| cosmic::Action::App(Message::MacWidgets(m)));\n"
+     "            }\n\\1"),
+    # popup: notifications (when there are any), then the widgets
+    (r"        let content = column!\[\n            padded_control\(self\.mac_calendar\(\)\),\n            padded_control\(divider::horizontal::default\(\)\)\.padding\(\[space_xxs, space_s\]\),\n            do_not_disturb,\n            main_content\n        \]",
+     "        let _ = do_not_disturb; // Focus / Do Not Disturb lives in the Control Center\n"
+     "        let mut content = cosmic::widget::Column::new();\n"
+     "        if !self.cards.is_empty() {\n"
+     "            content = content.push(main_content);\n"
+     "        }\n"
+     "        let content = content\n"
+     "            .push(self.mac_widgets.view(&self.now).map(Message::MacWidgets))"),
+])
