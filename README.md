@@ -8,6 +8,7 @@ A macOS-style COSMIC desktop for Fedora. It survives COSMIC and Fedora updates w
 - **Top bar:** transparent Mac-style bar that recolors to match the wallpaper, with a Control Center (Wi-Fi, Bluetooth, Do Not Disturb, sound, brightness, power), a Mac battery item, and a Notification Center (clock, calendar, notifications).
 - **Dock and look:** a Mac-style glass Dock (tight icons with hover magnification, running-app dots, a divider, then minimized windows, Downloads and Trash; it hides only on screens showing a maximized window), frosted glass theme, MacTahoe icons, WhiteSur cursor and the Inter font.
 - **Spotlight:** Super+Space opens a centered Spotlight Search pill with Apps, Files, Shortcuts and Settings buttons; suggestions appear as you type.
+- **System Settings:** a macOS-style sidebar (search on top, colored icons, grouped pages).
 - **App switcher:** Alt+Tab shows a macOS Command-Tab style row of big app icons, with the selected app's name under it.
 - **Extras:** overview thumbnails are centered, and there are a Mac-style system monitor and a caffeine applet.
 

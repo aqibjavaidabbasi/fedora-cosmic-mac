@@ -19,6 +19,7 @@ cosmic-applets cosmic-app-list-built-version cosmic-app-list Dock icons (spacing
 cosmic-panel cosmic-panel-built-version cosmic-panel Top bar recolor
 cosmic-workspaces cosmic-workspaces-built-version cosmic-workspaces Centered overview thumbnails
 cosmic-launcher cosmic-launcher-built-version cosmic-launcher Spotlight launcher
+cosmic-settings cosmic-settings-built-version cosmic-settings Mac System Settings sidebar
 EOF
 
 echo "Helper apps:"

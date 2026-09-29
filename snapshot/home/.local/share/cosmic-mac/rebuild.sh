@@ -48,6 +48,7 @@ if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-panel 2>/dev/null)" cosmic-panel-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-workspaces 2>/dev/null)" cosmic-workspaces-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-launcher 2>/dev/null)" cosmic-launcher-built-version \
+   && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-settings 2>/dev/null)" cosmic-settings-built-version \
    && [ -x "$HOME/.local/bin/cosmic-mac-control-center" ] && [ -x "$HOME/.local/bin/cosmic-mac-battery" ] \
    && [ -x "$HOME/.local/bin/cosmic-mac-wifi" ] && [ -x "$HOME/.local/bin/cosmic-mac-bluetooth" ] \
    && [ -x "$HOME/.local/bin/cosmic-mac-stats" ]; then
@@ -184,6 +185,22 @@ rebuild_extra() {
 rebuild_extra cosmic-panel cosmic-panel panel cosmic-panel-bin cosmic-panel
 rebuild_extra cosmic-workspaces cosmic-workspaces-epoch workspaces "" cosmic-workspaces
 rebuild_extra cosmic-launcher cosmic-launcher launcher "" cosmic-launcher
+
+# --- System Settings: macOS sidebar (patches/settings.py) --------------------
+# AVIF wallpaper previews need dav1d's headers (dnf install dav1d-devel); without
+# them it builds without AVIF support.
+SV=$(rpm -q --qf '%{VERSION}' cosmic-settings 2>/dev/null) && if stale "$SV" cosmic-settings-built-version; then
+    SSRC=$D/build/cosmic-settings ST=$HOME/.cache/cosmic-mac/target-settings
+    FEAT=(); pkg-config --exists dav1d || FEAT=(--no-default-features --features a11y,linux,single-instance,wgpu,systemd)
+    if checkout "$SSRC" cosmic-settings "epoch-$SV" && apply_feature settings . \
+        && CARGO_TARGET_DIR=$ST nice -n 19 cargo build --release --locked "${FEAT[@]}" -Zgit=shallow-deps; then
+        install -Dm755 "$ST/release/cosmic-settings" "$D/bin/cosmic-settings"
+        save_feature settings .
+        echo "$SV" > "$D/cosmic-settings-built-version"
+    else
+        FAILED+=("System Settings")
+    fi
+fi
 
 # --- Control Center and Battery (standalone; rebuilt when missing or forced) ---
 build_app() {

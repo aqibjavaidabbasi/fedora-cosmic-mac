@@ -20,7 +20,7 @@ step "Installing COSMIC (if missing), build tools and fonts"
 rpm -q cosmic-comp >/dev/null 2>&1 || sudo dnf install -y @cosmic-desktop
 sudo dnf install -y git python3 rsync file flatpak libnotify gtk-update-icon-cache \
     cargo rust dnf-plugins-core rsms-inter-fonts
-sudo dnf builddep -y cosmic-comp cosmic-applets cosmic-panel cosmic-workspaces cosmic-launcher
+sudo dnf builddep -y cosmic-comp cosmic-applets cosmic-panel cosmic-workspaces cosmic-launcher cosmic-settings
 
 step "Installing Mac icon and cursor themes"
 mkdir -p ~/.local/share/icons
