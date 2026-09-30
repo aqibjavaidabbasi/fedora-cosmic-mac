@@ -222,7 +222,19 @@ done
 # Bars showing the desktop: re-tint with the wallpaper color.
 "$HOME/.local/share/cosmic-mac/panel-contrast.py" || true
 
-# COSMIC Files stays installed (COSMIC needs it) but is hidden from Launchpad and search
+# Open/save dialogs from Files (Nautilus, GNOME portal) instead of COSMIC Files
+mkdir -p ~/.config/xdg-desktop-portal
+cat > ~/.config/xdg-desktop-portal/cosmic-portals.conf <<'PORTALS'
+# cosmic-mac: open/save dialogs come from Files (Nautilus, via the GNOME portal)
+# instead of COSMIC Files; everything else stays with COSMIC's portal.
+[preferred]
+default=cosmic;gtk;
+org.freedesktop.impl.portal.FileChooser=gnome;gtk;
+org.freedesktop.impl.portal.Secret=oo7-portal;gnome-keyring;
+PORTALS
+systemctl --user try-restart xdg-desktop-portal 2>/dev/null || true
+
+# If COSMIC Files is still installed, keep it out of Launchpad and search
 sed '/^\[Desktop Entry\]/a NoDisplay=true' /usr/share/applications/com.system76.CosmicFiles.desktop \
     > ~/.local/share/applications/com.system76.CosmicFiles.desktop 2>/dev/null || true
 # Files windows get a blurred see-through sidebar (the patched compositor reads this list)
