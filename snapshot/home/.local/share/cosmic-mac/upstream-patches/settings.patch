@@ -457,7 +457,7 @@ index 01b31d0..a618bcc 100644
  pub fn color_button<'a, Message: 'a + Clone>(
      on_press: Option<Message>,
 diff --git a/cosmic-settings/src/widget/mod.rs b/cosmic-settings/src/widget/mod.rs
-index e53b151..5312d04 100644
+index e53b151..6c198ee 100644
 --- a/cosmic-settings/src/widget/mod.rs
 +++ b/cosmic-settings/src/widget/mod.rs
 @@ -88,7 +88,7 @@ pub fn search_page_link<Message: 'static>(title: &str) -> button::TextButton<'_,
@@ -465,7 +465,7 @@ index e53b151..5312d04 100644
  pub fn page_title<Message: 'static>(page: &page::Info) -> Element<'_, Message> {
      row::with_capacity(2)
 -        .push(text::title3(page.title.as_str()))
-+        .push(text::title2(page.title.as_str()).size(26))
++        .push(text::title2(page.title.as_str()).size(26).font(cosmic::iced::Font { family: cosmic::iced::font::Family::Name("SF Pro Display"), ..cosmic::iced::Font::DEFAULT }))
          .push(horizontal())
          .into()
  }
@@ -492,7 +492,7 @@ index e53b151..5312d04 100644
          .push(previous_button)
 -        .push(sub_page_header)
 -        .spacing(6)
-+        .push(text::title2(sub_page).size(26))
++        .push(text::title2(sub_page).size(26).font(cosmic::iced::Font { family: cosmic::iced::font::Family::Name("SF Pro Display"), ..cosmic::iced::Font::DEFAULT }))
 +        .spacing(12)
 +        .align_y(cosmic::iced::Alignment::Center)
          .width(Length::Shrink)
