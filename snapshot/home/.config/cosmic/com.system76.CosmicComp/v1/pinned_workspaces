@@ -1,22 +1,6 @@
 [
     (
         output: (
-            name: "eDP-1",
-            edid: Some((
-                manufacturer: ('S', 'H', 'P'),
-                product: 5300,
-                serial: Some(1188768),
-                manufacture_week: 5,
-                manufacture_year: 2019,
-                model_year: None,
-            )),
-        ),
-        tiling_enabled: false,
-        id: Some("1f8f746"),
-        name: None,
-    ),
-    (
-        output: (
             name: "DP-1",
             edid: Some((
                 manufacturer: ('S', 'A', 'M'),

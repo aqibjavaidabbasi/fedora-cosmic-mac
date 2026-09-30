@@ -65,6 +65,11 @@ put $D/plugins_center 'Some([
     "com.aqib.DockTrash",
 ])'
 
+# Dock: Files (Nautilus) instead of COSMIC Files; other pinned apps kept
+AL=$C/com.system76.CosmicAppList/v1/favorites
+[ -f "$AL" ] || cp /usr/share/cosmic/com.system76.CosmicAppList/v1/favorites "$AL" 2>/dev/null || true
+[ ! -f "$AL" ] || sed -i 's/"com.system76.CosmicFiles"/"org.gnome.Nautilus"/' "$AL"
+
 # --- Top bar: Mac layout, clock on the right, nearly transparent -----------
 P=$C/com.system76.CosmicPanel.Panel/v1
 put $P/opacity 0.2
@@ -216,6 +221,12 @@ for d in "$C"/com.system76.CosmicPanel.Panel-*/v1; do
 done
 # Bars showing the desktop: re-tint with the wallpaper color.
 "$HOME/.local/share/cosmic-mac/panel-contrast.py" || true
+
+# COSMIC Files stays installed (COSMIC needs it) but is hidden from Launchpad and search
+sed '/^\[Desktop Entry\]/a NoDisplay=true' /usr/share/applications/com.system76.CosmicFiles.desktop \
+    > ~/.local/share/applications/com.system76.CosmicFiles.desktop 2>/dev/null || true
+# Files windows get a blurred see-through sidebar (the patched compositor reads this list)
+[ -f ~/.config/cosmic-mac/blur-apps ] || printf '# Apps whose windows are blurred behind, like macOS vibrancy (one app id per line)\norg.gnome.Nautilus\n' > ~/.config/cosmic-mac/blur-apps
 
 # --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
 "$HOME/.local/share/cosmic-mac/gtk-css.sh"
