@@ -8,7 +8,8 @@ placessidebar .navigation-sidebar {
   background-color: rgb(236, 236, 241);
 }
 
-/* Files window: see-through sidebar; the patched compositor blurs what is behind
+/* Files window: the same frosted sidebar as System Settings (94% tint over the
+   compositor blur of what is behind; blur-apps list)
    (~/.config/cosmic-mac/blur-apps), like macOS vibrancy. The files side stays solid. */
 window.nautilus-window,
 window.nautilus-window.background {
@@ -23,7 +24,7 @@ window.nautilus-window placessidebar .navigation-sidebar {
   box-shadow: none;
 }
 window.nautilus-window .sidebar-pane {
-  background-color: rgba(244, 244, 248, 0.55);
+  background-color: rgba(236, 236, 241, 0.94);
 }
 window.nautilus-window .content-pane {
   background-color: rgb(250, 250, 250);
