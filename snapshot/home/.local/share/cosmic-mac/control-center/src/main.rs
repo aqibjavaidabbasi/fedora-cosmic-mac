@@ -62,6 +62,7 @@ struct Status {
     wifi_name: Option<String>,
     bluetooth_on: bool,
     airplane: bool,
+    touch: Option<Touch>, // None when there is no touchscreen
     dnd: bool,
     dark: bool,
     volume: u32,
@@ -117,6 +118,7 @@ enum Message {
     BtDevice(bt::Device),
     BtNearby,
     Airplane,
+    Touch,
     Focus,
     DarkMode,
     Volume(u32),
@@ -135,6 +137,44 @@ enum Message {
     LogOut,
     Restart,
     ShutDown,
+}
+
+/// The touchscreen: its sysfs "inhibited" switches, whether it is on, and whether we may flip it.
+#[derive(Clone, Debug, Default)]
+struct Touch {
+    switches: Vec<std::path::PathBuf>,
+    on: bool,
+    writable: bool,
+}
+
+/// Touchscreens: devices udev tags ID_INPUT_TOUCHSCREEN, plus Surface IPTS touch devices.
+fn find_touch() -> Option<Touch> {
+    let mut t = Touch::default();
+    for e in std::fs::read_dir("/sys/class/input").ok()?.flatten() {
+        let dir = e.path();
+        let name = std::fs::read_to_string(dir.join("name")).unwrap_or_default();
+        let name = name.trim();
+        let is_touch = name == "Intel Touch Host Controller" || {
+            // udev's database, keyed by the event node's major:minor
+            std::fs::read_dir(&dir).into_iter().flatten().flatten().any(|c| {
+                c.file_name().to_string_lossy().starts_with("event")
+                    && std::fs::read_to_string(c.path().join("dev"))
+                        .ok()
+                        .and_then(|d| std::fs::read_to_string(format!("/run/udev/data/c{}", d.trim())).ok())
+                        .is_some_and(|db| db.contains("E:ID_INPUT_TOUCHSCREEN=1"))
+            })
+        };
+        let switch = dir.join("inhibited");
+        if is_touch && switch.exists() {
+            t.switches.push(switch);
+        }
+    }
+    if t.switches.is_empty() {
+        return None;
+    }
+    t.on = t.switches.iter().any(|p| std::fs::read_to_string(p).is_ok_and(|v| v.trim() == "0"));
+    t.writable = t.switches.iter().all(|p| std::fs::OpenOptions::new().write(true).open(p).is_ok());
+    Some(t)
 }
 
 fn run(program: &str, args: &[&str]) {
@@ -206,6 +246,7 @@ async fn gather() -> Status {
 
     let rf = output("rfkill", &["-n", "-o", "SOFT"]).await;
     s.airplane = !rf.trim().is_empty() && rf.lines().all(|l| l.trim() == "blocked");
+    s.touch = find_touch();
 
     s.dnd = tokio::fs::read_to_string(dnd_path()).await.map(|v| v.trim() == "true").unwrap_or(false);
     s.dark = tokio::fs::read_to_string(dark_path()).await.map(|v| v.trim() == "true").unwrap_or(true);
@@ -779,6 +820,20 @@ impl cosmic::Application for ControlCenter {
                     run("bluetoothctl", &["power", "off"]);
                 }
             }
+            Message::Touch => {
+                if let Some(t) = self.status.touch.as_mut() {
+                    if t.writable {
+                        t.on = !t.on;
+                        for p in &t.switches {
+                            let _ = std::fs::write(p, if t.on { "0" } else { "1" });
+                        }
+                    } else {
+                        // one-time setup: lets you switch the touchscreen without a password
+                        let script = format!("{}/.local/share/cosmic-mac/touch-setup.sh", home());
+                        run("pkexec", &["/bin/sh", &script]);
+                    }
+                }
+            }
             Message::Airplane => {
                 let s = &mut self.status;
                 s.airplane = !s.airplane;
@@ -1005,6 +1060,10 @@ impl cosmic::Application for ControlCenter {
         .spacing(GAP);
 
         let mut grid = Column::new().push(block1).push(block2).push(block3).spacing(GAP);
+        if let Some(t) = &s.touch {
+            let sub = if !t.writable { "Set Up…" } else if t.on { "On" } else { "Off" };
+            grid = grid.push(row![pill("input-tablet-symbolic", "Touch", Some(sub.to_string()), t.on, Message::Touch)].spacing(GAP));
+        }
 
         if let Some((cur, max)) = s.brightness {
             grid = grid.push(self.slider_card(
