@@ -146,3 +146,10 @@ pub fn secondary_small<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
         .class(theme::Text::Custom(dim_text))
         .into()
 }
+
+/// Top-bar button padding [vertical, horizontal]: COSMIC's own vertical padding,
+/// half its horizontal padding, so bar items sit close together like macOS.
+pub fn bar_padding(applet: &cosmic::applet::Context) -> [u16; 2] {
+    let (major, minor) = applet.suggested_padding(true);
+    if applet.is_horizontal() { [minor, major / 2] } else { [major / 2, minor] }
+}

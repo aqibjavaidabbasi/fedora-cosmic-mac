@@ -166,7 +166,7 @@ impl cosmic::Application for Bluetooth {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        self.core.applet.icon_button(self.panel_icon()).on_press_down(Message::TogglePopup).into()
+        self.core.applet.icon_button(self.panel_icon()).padding(style::bar_padding(&self.core.applet)).on_press_down(Message::TogglePopup).into()
     }
 
     fn view_window(&self, _id: window::Id) -> Element<'_, Message> {

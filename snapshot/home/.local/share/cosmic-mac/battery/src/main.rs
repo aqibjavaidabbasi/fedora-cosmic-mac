@@ -182,10 +182,9 @@ impl cosmic::Application for Battery {
 
     fn view(&self) -> Element<'_, Message> {
         let (icon_size, _) = self.core.applet.suggested_size(true);
-        let (pad_major, pad_minor) = self.core.applet.suggested_padding(true);
         let low_power = self.snap.as_ref().and_then(|s| s.low_power).unwrap_or(false);
 
-        let mut content = row![].spacing(pad_minor).align_y(Alignment::Center);
+        let mut content = row![].spacing(4).align_y(Alignment::Center);
         if let Some(s) = self.snap.as_ref().filter(|s| s.present) {
             content = content.push(self.core.applet.text(format!("{:.0}%", s.percent)));
         }
@@ -194,7 +193,7 @@ impl cosmic::Application for Battery {
         let btn = button::custom(container(content).class(style::low_power_tint(low_power)))
             .on_press_down(Message::TogglePopup)
             .class(Button::AppletIcon)
-            .padding([pad_minor, pad_major]);
+            .padding(style::bar_padding(&self.core.applet));
 
         self.core.applet.autosize_window(btn).into()
     }

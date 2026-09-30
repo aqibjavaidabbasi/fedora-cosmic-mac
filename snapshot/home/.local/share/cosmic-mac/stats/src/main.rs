@@ -331,7 +331,6 @@ impl cosmic::Application for Stats {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let (pad_major, pad_minor) = self.core.applet.suggested_padding(true);
         let (size, _) = self.core.applet.suggested_size(true);
         let mut r = Row::new().spacing(10).align_y(Alignment::Center);
         for m in &self.show {
@@ -344,7 +343,7 @@ impl cosmic::Application for Stats {
         }
         self.core
             .applet
-            .autosize_window(button::custom(r).class(Button::AppletIcon).padding([pad_minor, pad_major]).on_press_down(Message::TogglePopup))
+            .autosize_window(button::custom(r).class(Button::AppletIcon).padding(style::bar_padding(&self.core.applet)).on_press_down(Message::TogglePopup))
             .into()
     }
 

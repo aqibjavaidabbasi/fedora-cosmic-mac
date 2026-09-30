@@ -16,6 +16,18 @@ use crate::{menu, tab};
 
 type Act = cosmic::Action<Message>;
 
+/// Set once the compositor was asked to blur behind the window.
+pub static BLURRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Vertical gloss: `top` fading to `bottom`.
+fn gloss(top: Color, bottom: Color) -> Background {
+    Background::Gradient(cosmic::iced::Gradient::Linear(
+        cosmic::iced::gradient::Linear::new(cosmic::iced::Radians(std::f32::consts::PI))
+            .add_stop(0.0, top)
+            .add_stop(1.0, bottom),
+    ))
+}
+
 fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
@@ -63,11 +75,15 @@ pub fn sidebar<'a>(nav: Element<'a, Act>) -> Element<'a, Act> {
         .height(Length::Fill)
         .class(theme::Container::custom(|t| {
             let c = t.cosmic();
-            // COSMIC doesn't blur app windows yet, so a nearly opaque cool tint stands in
-            // for the vibrancy (same as the System Settings sidebar).
-            let tint = if c.is_dark { Color::from_rgba(0.15, 0.15, 0.16, 0.94) } else { Color::from_rgba(0.925, 0.925, 0.945, 0.94) };
+            // Glossy sheen, lighter at the top and deeper at the bottom. Opaque:
+            // COSMIC doesn't blur behind app windows, so see-through would show clutter.
+            let (top, bottom) = if c.is_dark {
+                (Color::from_rgb(0.24, 0.24, 0.27), Color::from_rgb(0.13, 0.13, 0.15))
+            } else {
+                (Color::from_rgb(0.99, 0.99, 1.0), Color::from_rgb(0.88, 0.89, 0.92))
+            };
             container::Style {
-                background: Some(Background::Color(tint)),
+                background: Some(gloss(top, bottom)),
                 border: Border { radius: [12.0, 0.0, 0.0, 12.0].into(), ..Default::default() },
                 ..Default::default()
             }
@@ -151,7 +167,12 @@ pub fn content<'a>(app: &'a App, files: Element<'a, Message>) -> Element<'a, Mes
         .class(theme::Container::custom(|t| {
             let c = t.cosmic();
             container::Style {
-                background: Some(Background::Color(c.background(false).base.into())),
+                background: Some({
+                    let base: Color = c.background(false).base.into();
+                    let lift = if c.is_dark { 0.035 } else { 0.02 };
+                    let top = Color { r: (base.r + lift).min(1.0), g: (base.g + lift).min(1.0), b: (base.b + lift).min(1.0), a: 1.0 };
+                    gloss(top, Color { a: 1.0, ..base })
+                }),
                 border: Border { radius: [0.0, 12.0, 12.0, 0.0].into(), ..Default::default() },
                 ..Default::default()
             }

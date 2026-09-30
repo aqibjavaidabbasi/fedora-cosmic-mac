@@ -973,7 +973,6 @@ impl cosmic::Application for ControlCenter {
     fn view(&self) -> Element<'_, Message> {
         // While recording, the icon becomes a red record dot (click it to open the stop tiles).
         if self.status.recording {
-            let (pad_major, pad_minor) = self.core.applet.suggested_padding(true);
             let (size, _) = self.core.applet.suggested_size(true);
             let dot = container(icon::from_name("media-record-symbolic").size(size).symbolic(true)).class(theme::Container::custom(|_| {
                 cosmic::iced::widget::container::Style { icon_color: Some(Color::from_rgb(1.0, 0.231, 0.188)), ..Default::default() }
@@ -981,7 +980,7 @@ impl cosmic::Application for ControlCenter {
             return self
                 .core
                 .applet
-                .autosize_window(button::custom(dot).class(Button::AppletIcon).padding([pad_minor, pad_major]).on_press_down(Message::TogglePopup))
+                .autosize_window(button::custom(dot).class(Button::AppletIcon).padding(style::bar_padding(&self.core.applet)).on_press_down(Message::TogglePopup))
                 .into();
         }
         self.core.applet.icon_button("com.aqib.control-center-symbolic").on_press_down(Message::TogglePopup).into()

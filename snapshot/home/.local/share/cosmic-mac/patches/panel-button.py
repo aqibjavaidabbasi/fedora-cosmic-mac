@@ -71,7 +71,8 @@ s, n5 = re.subn(
             let small = ((suggested.0 as f32) * 0.8).round() as u16;
             ((small, small), ((horizontal_padding as f32) * 0.3).max(2.0) as u16)
         } else {
-            (suggested, horizontal_padding)
+            // top bar: half the usual side padding, so items sit close like macOS
+            (suggested, horizontal_padding / 2)
         };
         let (pad_top, pad_bottom) = if dock { ((total - suggested.1 - 8) as f32, 8.0) } else { (0.0, 0.0) };
 """, s, count=1)

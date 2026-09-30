@@ -208,7 +208,6 @@ impl cosmic::Application for MacMenu {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let (pad_major, pad_minor) = self.core.applet.suggested_padding(true);
         let (size, _) = self.core.applet.suggested_size(true);
         let logo_icon = if self.logo.starts_with('/') {
             icon::from_path(self.logo.clone().into())
@@ -217,11 +216,11 @@ impl cosmic::Application for MacMenu {
         };
         let logo = button::custom(icon::icon(logo_icon).size(size))
             .class(Button::AppletIcon)
-            .padding([pad_minor, pad_major])
+            .padding(style::bar_padding(&self.core.applet))
             .on_press_down(Message::Toggle(Which::Logo));
         let name = button::custom(self.core.applet.text(self.name.clone()).font(cosmic::font::bold()))
             .class(Button::AppletIcon)
-            .padding([pad_minor, pad_major])
+            .padding(style::bar_padding(&self.core.applet))
             .on_press_down(Message::Toggle(Which::App));
         self.core
             .applet

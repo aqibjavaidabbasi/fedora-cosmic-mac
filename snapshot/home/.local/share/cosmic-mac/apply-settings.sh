@@ -68,6 +68,8 @@ put $D/plugins_center 'Some([
 # --- Top bar: Mac layout, clock on the right, nearly transparent -----------
 P=$C/com.system76.CosmicPanel.Panel/v1
 put $P/opacity 0.2
+put $P/size S          # 20px icons, like the macOS menu bar
+put $P/spacing 0
 put $P/plugins_center 'Some([])'
 # macOS order: logo menu + app name on the left; extras, Bluetooth, battery,
 # Wi-Fi, Spotlight, Control Center and the clock on the right.
@@ -214,5 +216,9 @@ for d in "$C"/com.system76.CosmicPanel.Panel-*/v1; do
 done
 # Bars showing the desktop: re-tint with the wallpaper color.
 "$HOME/.local/share/cosmic-mac/panel-contrast.py" || true
+
+# --- COSMIC Files (Finder look) is the default file manager -----------------
+xdg-mime default com.system76.CosmicFiles.desktop inode/directory
+[ ! -f ~/.config/cosmic-mimeapps.list ] || sed -i 's|^inode/directory=.*|inode/directory=com.system76.CosmicFiles.desktop|' ~/.config/cosmic-mimeapps.list
 
 echo "COSMIC customizations applied."
