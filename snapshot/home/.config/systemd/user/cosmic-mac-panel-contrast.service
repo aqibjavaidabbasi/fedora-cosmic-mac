@@ -1,7 +1,8 @@
 [Unit]
-Description=Match the top bar to the wallpaper; keep per-display docks in step with the Dock settings
+Description=Match the top bar to the wallpaper; keep per-display docks in step with the Dock settings; keep the Files sidebar style
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/share/cosmic-mac/dock-sync.sh
 ExecStart=%h/.local/share/cosmic-mac/panel-contrast.py
+ExecStart=%h/.local/share/cosmic-mac/gtk-css.sh

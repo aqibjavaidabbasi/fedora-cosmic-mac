@@ -217,8 +217,7 @@ done
 # Bars showing the desktop: re-tint with the wallpaper color.
 "$HOME/.local/share/cosmic-mac/panel-contrast.py" || true
 
-# --- COSMIC Files (Finder look) is the default file manager -----------------
-xdg-mime default com.system76.CosmicFiles.desktop inode/directory
-[ ! -f ~/.config/cosmic-mimeapps.list ] || sed -i 's|^inode/directory=.*|inode/directory=com.system76.CosmicFiles.desktop|' ~/.config/cosmic-mimeapps.list
+# --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
+"$HOME/.local/share/cosmic-mac/gtk-css.sh"
 
 echo "COSMIC customizations applied."

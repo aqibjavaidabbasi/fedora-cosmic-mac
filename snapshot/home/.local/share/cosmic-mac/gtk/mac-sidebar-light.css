@@ -1,0 +1,58 @@
+/* macOS System Settings style sidebar for Files (Nautilus) and file dialogs.
+   Written by cosmic-mac (gtk-css.sh); COSMIC's generated theme imports it. */
+
+placessidebar,
+placessidebar > scrolledwindow,
+placessidebar .navigation-sidebar {
+  background-color: rgb(236, 236, 241);
+}
+placessidebar .navigation-sidebar {
+  padding: 6px 10px 10px 10px;
+}
+placessidebar .navigation-sidebar > row {
+  min-height: 32px;
+  padding: 2px 8px;
+  margin: 1px 0;
+  border-radius: 8px;
+  font-size: 14px;
+}
+placessidebar .navigation-sidebar > row:hover {
+  background-color: rgba(0, 0, 0, 0.07);
+}
+placessidebar .navigation-sidebar > row:selected,
+placessidebar .navigation-sidebar > row:selected:hover {
+  background-color: rgba(0, 0, 0, 0.10);
+  color: inherit;
+}
+placessidebar .navigation-sidebar > row:selected label {
+  color: inherit;
+}
+/* white glyph on a colored rounded square, like System Settings */
+placessidebar .navigation-sidebar > row box > image:first-child {
+  color: white;
+  -gtk-icon-size: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 5px;
+  border-radius: 7px;
+  margin-end: 3px;
+  background-color: #8E8E93; /* drives, bookmarks */
+}
+/* Home, Recent, Starred, Desktop, Network, Trash, Documents, Music, Pictures, Videos, Downloads */
+placessidebar .navigation-sidebar > row:nth-child(1) box > image:first-child { background-color: #0A84FF; }
+placessidebar .navigation-sidebar > row:nth-child(2) box > image:first-child { background-color: #FF9F0A; }
+placessidebar .navigation-sidebar > row:nth-child(3) box > image:first-child { background-color: #FFB800; }
+placessidebar .navigation-sidebar > row:nth-child(4) box > image:first-child { background-color: #5E5CE6; }
+placessidebar .navigation-sidebar > row:nth-child(5) box > image:first-child { background-color: #32ADE6; }
+placessidebar .navigation-sidebar > row:nth-child(6) box > image:first-child { background-color: #8E8E93; }
+placessidebar .navigation-sidebar > row:nth-child(7) box > image:first-child { background-color: #0A84FF; }
+placessidebar .navigation-sidebar > row:nth-child(8) box > image:first-child { background-color: #FF375F; }
+placessidebar .navigation-sidebar > row:nth-child(9) box > image:first-child { background-color: #34C759; }
+placessidebar .navigation-sidebar > row:nth-child(10) box > image:first-child { background-color: #BF5AF2; }
+placessidebar .navigation-sidebar > row:nth-child(11) box > image:first-child { background-color: #30B0C7; }
+/* group gaps instead of lines */
+placessidebar .navigation-sidebar > separator,
+placessidebar .navigation-sidebar separator {
+  background: none;
+  min-height: 10px;
+}

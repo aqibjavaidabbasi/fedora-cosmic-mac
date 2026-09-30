@@ -21,7 +21,6 @@ cosmic-workspaces cosmic-workspaces-built-version cosmic-workspaces Centered ove
 cosmic-launcher cosmic-launcher-built-version cosmic-launcher Spotlight launcher
 cosmic-settings cosmic-settings-built-version cosmic-settings Mac System Settings sidebar
 cosmic-app-library cosmic-app-library-built-version cosmic-app-library Launchpad
-cosmic-files cosmic-files-built-version cosmic-files Finder look for Files
 cosmic-osd cosmic-osd-built-version cosmic-osd Mac-style system alerts
 EOF
 

@@ -8,7 +8,7 @@ A macOS-style COSMIC desktop for Fedora. It survives COSMIC and Fedora updates w
 - **Top bar:** transparent Mac-style bar that recolors to match the wallpaper, laid out like macOS: on the left a logo menu (About, System Settings, App Store, Force Quit, Sleep, Restart, Shut Down, Lock Screen, Log Out) and the focused app's name in bold (Hide, Hide Others, Quit); on the right the extras, Bluetooth, battery, Wi-Fi, a Spotlight magnifier, the Control Center (Wi-Fi, Bluetooth, Do Not Disturb, sound, brightness, power), a Mac battery item, and a Notification Center (clock, calendar, notifications).
 - **Dock and look:** a Mac-style glass Dock (tight icons with hover magnification, running-app dots, a divider, then minimized windows, Downloads and Trash; it hides only on screens showing a maximized window), frosted glass theme, MacTahoe icons, WhiteSur cursor, and Apple's SF Pro font (from your own SF-Pro.dmg; Inter otherwise).
 - **Launchpad:** the App Library opens full screen over the blurred wallpaper with a search pill, 7 x 5 pages of big icons with page dots (scroll or swipe to turn pages), and folders shown as glass tiles with mini icons. It opens from the Launchpad icon at the start of the Dock or Super+A.
-- **Finder:** COSMIC Files is the default file manager and looks like Finder: traffic lights on a glossy sidebar and a Finder toolbar with back/forward, the folder name in bold, a grid/list switch, search, and the File/Edit/View/Sort menus.
+- **Files (Nautilus):** the default file manager, with a sidebar like System Settings: colored rounded icons, grouped places, a soft selection. The style is re-added whenever COSMIC regenerates its GTK theme.
 - **System alerts:** Log Out, Restart and Shut Down confirmations and password prompts are small macOS-style cards: icon on top, bold centered title, capsule buttons with the default one in blue.
 - **Spotlight:** Super+Space opens a centered Spotlight Search pill with Apps, Files, Shortcuts and Settings buttons; suggestions appear as you type.
 - **System Settings:** a macOS-style sidebar (search on top, colored icons, grouped pages).
@@ -124,7 +124,7 @@ Inside `snapshot/home/`:
 | `.local/bin/cosmic-*` | Launchers that pick the customized or the stock COSMIC program |
 | `.config/cosmic/` | Every COSMIC setting of the original desktop, used by `--restore` |
 | `.config/cosmic-mac/` | Swipe and animation tuning |
-| `.config/systemd/user/` | The daily rebuild timer and the wallpaper watcher that recolors the top bar |
+| `.config/systemd/user/` | The daily rebuild timer and the watcher that recolors the top bar and keeps the Files sidebar style |
 
 Compiled programs, upstream source checkouts, and the large icon themes are not stored. They are rebuilt or downloaded.
 
