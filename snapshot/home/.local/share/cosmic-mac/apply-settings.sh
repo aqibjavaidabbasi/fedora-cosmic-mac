@@ -6,6 +6,25 @@
 C=~/.config/cosmic
 put() { mkdir -p "$(dirname "$1")"; printf '%s' "$2" > "$1"; }
 
+# --- Fonts: Apple's SF Pro when installed (install-sf-pro.sh), otherwise Inter ---
+if fc-list : family | grep -qx "SF Pro Text"; then UI_FONT="SF Pro Text"; else UI_FONT="Inter"; fi
+K=$C/com.system76.CosmicTk/v1
+put $K/interface_font "(
+    family: \"$UI_FONT\",
+    weight: Normal,
+    stretch: Normal,
+    style: Normal,
+)"
+DCONF_PROFILE=cosmic gsettings set org.gnome.desktop.interface font-name "$UI_FONT 11"
+DCONF_PROFILE=cosmic gsettings set org.gnome.desktop.interface document-font-name "$UI_FONT 11"
+DCONF_PROFILE=cosmic gsettings set org.gnome.desktop.wm.preferences titlebar-font "$UI_FONT Semi-Bold 11"
+# System sans-serif, system-ui and the web's -apple-system / BlinkMacSystemFont -> SF Pro
+mkdir -p ~/.config/fontconfig/conf.d
+cp -f "$HOME/.local/share/cosmic-mac/fonts/60-cosmic-mac-sf-pro.conf" ~/.config/fontconfig/conf.d/ 2>/dev/null || true
+fc-cache -f >/dev/null 2>&1 || true
+[ "${1:-}" = "--fonts-only" ] && { echo "Fonts applied: $UI_FONT"; exit 0; }
+
+
 # --- Workspaces: separate per display, left/right -------------------------
 put $C/com.system76.CosmicComp/v1/workspaces '(
     workspace_mode: OutputBound,
@@ -118,16 +137,10 @@ put $C/com.system76.CosmicPanelButton/v1/configs "{
     \"Dock\": (force_presentation: Some(Icon)),
 }"
 
-# --- Icons, font, compact title bars ---------------------------------------
+# --- Icons, compact title bars ----------------------------------------------
 K=$C/com.system76.CosmicTk/v1
 put $K/icon_theme '"MacTahoe-COSMIC"'
 put $K/header_size Compact
-put $K/interface_font '(
-    family: "Inter",
-    weight: Normal,
-    stretch: Normal,
-    style: Normal,
-)'
 
 # --- Super+Space opens app search (like Cmd+Space) -------------------------
 put $C/com.system76.CosmicSettings.Shortcuts/v1/custom '{
@@ -137,7 +150,6 @@ put $C/com.system76.CosmicSettings.Shortcuts/v1/custom '{
 # --- GTK apps inside COSMIC (COSMIC has its own settings database) ---------
 DCONF_PROFILE=cosmic gsettings set org.gnome.desktop.interface cursor-theme 'WhiteSur-cursors'
 DCONF_PROFILE=cosmic gsettings set org.gnome.desktop.interface icon-theme 'MacTahoe-COSMIC'
-DCONF_PROFILE=cosmic gsettings set org.gnome.desktop.interface font-name 'Inter 11'
 
 # --- Mac cursor for the COSMIC session ------------------------------------
 if ! grep -q "Mac-style cursor in the COSMIC session" ~/.bash_profile 2>/dev/null; then

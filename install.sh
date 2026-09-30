@@ -73,6 +73,15 @@ if [ -n "$RESTORE" ]; then
     rsync -a "$S/.config/cosmic/" ~/.config/cosmic/
 fi
 
+step "Apple SF Pro font (optional)"
+if [ -f ~/Downloads/SF-Pro.dmg ]; then
+    sudo dnf install -y p7zip p7zip-plugins cpio >/dev/null
+    "$D/install-sf-pro.sh" ~/Downloads/SF-Pro.dmg
+else
+    echo "Using Inter. For the Mac's own font, download SF-Pro.dmg from https://developer.apple.com/fonts/"
+    echo "into ~/Downloads and run: ~/.local/share/cosmic-mac/install-sf-pro.sh"
+fi
+
 step "Enabling automatic rebuilds after COSMIC updates"
 systemctl --user daemon-reload
 systemctl --user enable --now cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path
