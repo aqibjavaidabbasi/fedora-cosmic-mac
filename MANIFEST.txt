@@ -5,7 +5,6 @@ cosmic-bg-1.8.0-1.fc44.x86_64
 cosmic-comp-1.8.0-1.fc44.x86_64
 cosmic-config-fedora-0~git.20241103.1.d35e087-5.fc44.noarch
 cosmic-edit-1.8.0-1.fc44.x86_64
-cosmic-files-1.8.0-1.fc44.x86_64
 cosmic-greeter-1.8.0-3.fc44.x86_64
 cosmic-icon-theme-1.8.0-1.fc44.noarch
 cosmic-idle-1.8.0-1.fc44.x86_64

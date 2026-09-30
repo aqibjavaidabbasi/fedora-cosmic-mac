@@ -168,10 +168,10 @@ impl cosmic::Application for MacMenu {
                 if was == Some(which) {
                     return close;
                 }
+                let new_id = window::Id::unique();
                 let open = surface::surface_task(surface::action::app_popup(
                     |_| Default::default(),
                     move |app: &mut MacMenu| {
-                        let new_id = window::Id::unique();
                         app.popup = Some((new_id, which));
                         let mut s = app.core.applet.get_popup_settings(app.core.main_window_id().unwrap(), new_id, Some((1, 1)), None, None);
                         // open under the button that was clicked, left-aligned like macOS
@@ -181,7 +181,7 @@ impl cosmic::Application for MacMenu {
                         s
                     },
                     None,
-                ));
+                )).chain(style::blur(new_id));
                 return close.chain(open);
             }
             Message::CloseRequested(id) => {

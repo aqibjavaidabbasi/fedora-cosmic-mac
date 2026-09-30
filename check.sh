@@ -22,6 +22,7 @@ cosmic-launcher cosmic-launcher-built-version cosmic-launcher Spotlight launcher
 cosmic-settings cosmic-settings-built-version cosmic-settings Mac System Settings sidebar
 cosmic-app-library cosmic-app-library-built-version cosmic-app-library Launchpad
 cosmic-osd cosmic-osd-built-version cosmic-osd Mac-style system alerts
+cosmic-store cosmic-store-built-version cosmic-store Mac App Store
 EOF
 
 echo "Helper apps:"

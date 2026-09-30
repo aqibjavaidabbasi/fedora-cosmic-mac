@@ -294,15 +294,15 @@ impl cosmic::Application for Stats {
                 }
                 self.show = load_show();
                 self.sampler.sample(true); // prime the per-process counters
+                let new_id = window::Id::unique();
                 return surface::surface_task(surface::action::app_popup(
                     |_| Default::default(),
-                    |app: &mut Stats| {
-                        let new_id = window::Id::unique();
+                    move |app: &mut Stats| {
                         app.popup.replace(new_id);
                         app.core.applet.get_popup_settings(app.core.main_window_id().unwrap(), new_id, Some((1, 1)), None, None)
                     },
                     None,
-                ));
+                )).chain(style::blur(new_id));
             }
             Message::CloseRequested(id) => {
                 if Some(id) == self.popup {

@@ -1,0 +1,232 @@
+diff --git a/i18n/en/cosmic_store.ftl b/i18n/en/cosmic_store.ftl
+index db43830..186fa5f 100644
+--- a/i18n/en/cosmic_store.ftl
++++ b/i18n/en/cosmic_store.ftl
+@@ -1,4 +1,4 @@
+-app-name = COSMIC Store
++app-name = App Store
+ comment = Application store for the COSMIC desktop
+ keywords = App;Software;Store;Shop;
+ back = Back
+diff --git a/res/com.system76.CosmicStore.desktop b/res/com.system76.CosmicStore.desktop
+index baba511..4b5b9d8 100644
+--- a/res/com.system76.CosmicStore.desktop
++++ b/res/com.system76.CosmicStore.desktop
+@@ -1,5 +1,5 @@
+ [Desktop Entry]
+-Name=COSMIC Store
++Name=App Store
+ Comment=Application store for the COSMIC desktop
+ Exec=cosmic-store %u
+ Terminal=false
+diff --git a/src/main.rs b/src/main.rs
+index 7927b1c..97a2fd1 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -84,6 +84,7 @@ mod explore;
+ 
+ use nav::{Category, CategoryIndex, NavPage, ScrollContext};
+ mod nav;
++mod mac_store;
+ 
+ use search::{CachedExploreResults, SearchResult};
+ mod search;
+@@ -280,6 +281,11 @@ impl CosmicFlags for Flags {
+ /// Messages that are used specifically by our [`App`].
+ #[derive(Clone, Debug)]
+ pub enum Message {
++    MacClose,
++    MacMinimize,
++    MacMaximize,
++    MacDrag,
++    MacNav(widget::nav_bar::Id),
+     AppTheme(AppTheme),
+     BackendUpdate(BackendName, Arc<dyn Backend>),
+     BackendUpdateFinished,
+@@ -1646,7 +1652,14 @@ impl App {
+ 
+     fn update_title(&mut self) -> Task<Message> {
+         if let Some(window_id) = &self.core.main_window_id() {
+-            self.set_window_title(fl!("app-name"), *window_id)
++            Task::batch([self.set_window_title(fl!("app-name"), *window_id), cosmic::iced::runtime::task::effect(cosmic::iced::runtime::Action::PlatformSpecific(
++                cosmic::iced::runtime::platform_specific::Action::Wayland(
++                    cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
++                        *window_id,
++                        Some(vec![cosmic::iced::Rectangle { x: 0., y: 0., width: f32::MAX, height: f32::MAX }]),
++                    ),
++                ),
++            ))])
+         } else {
+             Task::none()
+         }
+@@ -2120,7 +2133,10 @@ impl Application for App {
+         }
+ 
+         match app.mode {
+-            Mode::Normal => {}
++            Mode::Normal => {
++                app.core.window.show_headerbar = false;
++                app.core.window.content_container = false;
++            }
+             Mode::GStreamer { .. } => {
+                 app.core.window.use_template = false;
+             }
+@@ -2130,6 +2146,21 @@ impl Application for App {
+         (app, command)
+     }
+ 
++    fn nav_bar(&self) -> Option<Element<'_, cosmic::Action<Self::Message>>> {
++        // the macOS sidebar is drawn by mac_store::window
++        None
++    }
++
++    fn style(&self) -> Option<cosmic::iced::theme::Style> {
++        if !matches!(self.mode, Mode::Normal) {
++            return None;
++        }
++        // transparent window: the sidebar is see-through (blurred by the compositor)
++        let t = cosmic::theme::active();
++        let on: cosmic::iced::Color = t.cosmic().on_bg_color().into();
++        Some(cosmic::iced::theme::Style { background_color: cosmic::iced::Color::TRANSPARENT, text_color: on, icon_color: on })
++    }
++
+     fn nav_model(&self) -> Option<&widget::nav_bar::Model> {
+         match self.mode {
+             Mode::GStreamer { .. } => None,
+@@ -2212,7 +2243,8 @@ impl Application for App {
+ 
+     /// Handle application events here.
+     fn update(&mut self, message: Self::Message) -> Task<Message> {
+-        self.handle_update(message)
++        let task = self.handle_update(message);
++        Task::batch([task, mac_store::blur_task(self)])
+     }
+ 
+     fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Message>> {
+@@ -2509,7 +2541,6 @@ impl Application for App {
+                 widget::id_container(
+                     widget::column::with_capacity(2)
+                         .spacing(space_xxs)
+-                        .push_maybe(self.back_button())
+                         .push(
+                             self.view_responsive(size)
+                                 .apply(widget::container)
+@@ -2642,7 +2673,10 @@ impl Application for App {
+ 
+         // Uncomment to debug layout:
+         //content.explain(cosmic::iced::Color::WHITE)
+-        content
++        match self.mode {
++            Mode::Normal => mac_store::window(self, content),
++            _ => content,
++        }
+     }
+ 
+     fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
+diff --git a/src/search.rs b/src/search.rs
+index 52b38bd..51aacd4 100644
+--- a/src/search.rs
++++ b/src/search.rs
+@@ -292,7 +292,16 @@ impl SearchResult {
+         .width(Length::Fixed(width as f32))
+         .height(Length::Fixed(48.0 + (spacing.space_xxs as f32) * 2.0))
+         .padding([spacing.space_xxs, spacing.space_s])
+-        .class(theme::Container::Card)
++        .class(theme::Container::custom(|t| {
++            // soft Mac tile instead of COSMIC's card
++            let c = t.cosmic();
++            let on: cosmic::iced::Color = c.on_bg_color().into();
++            cosmic::iced::widget::container::Style {
++                background: Some(cosmic::iced::Background::Color(cosmic::iced::Color { a: if c.is_dark { 0.06 } else { 0.035 }, ..on })),
++                border: cosmic::iced::Border { radius: 12.0.into(), width: 1.0, color: cosmic::iced::Color { a: 0.06, ..on } },
++                ..Default::default()
++            }
++        }))
+         .into()
+     }
+ }
+diff --git a/src/update.rs b/src/update.rs
+index 13ec62e..4aaa535 100644
+--- a/src/update.rs
++++ b/src/update.rs
+@@ -60,6 +60,11 @@ impl App {
+         }
+ 
+         match message {
++            Message::MacClose => return Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Close)),
++            Message::MacMinimize => return Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Minimize)),
++            Message::MacMaximize => return Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Maximize)),
++            Message::MacDrag => return Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Drag)),
++            Message::MacNav(id) => return <Self as cosmic::Application>::on_nav_select(self, id),
+             Message::AppTheme(app_theme) => {
+                 config_set!(app_theme, app_theme);
+                 return self.update_config();
+diff --git a/src/view.rs b/src/view.rs
+index 6e34bea..2662d54 100644
+--- a/src/view.rs
++++ b/src/view.rs
+@@ -737,63 +737,7 @@ impl App {
+                                         .height(Length::Fixed(size.height))
+                                         .into()
+                                 } else {
+-                                    let explore_pages = ExplorePage::all();
+-                                    let mut column =
+-                                        widget::column::with_capacity(explore_pages.len() * 2)
+-                                            .padding([0, space_s, space_m, space_s])
+-                                            .spacing(space_xxs)
+-                                            .width(Length::Fill);
+-                                    for explore_page in explore_pages.iter() {
+-                                        //TODO: ensure explore_page matches
+-                                        match self.explore_results.get(explore_page) {
+-                                            Some(results) if !results.is_empty() => {
+-                                                let GridMetrics { cols, .. } =
+-                                                    SearchResult::grid_metrics(
+-                                                        &spacing, grid_width,
+-                                                    );
+-
+-                                                let max_results = match cols {
+-                                                    1 => 4,
+-                                                    2 => 8,
+-                                                    3 => 9,
+-                                                    _ => cols * 2,
+-                                                };
+-
+-                                                //TODO: adjust results length based on app size?
+-                                                let results_len =
+-                                                    cmp::min(results.len(), max_results);
+-
+-                                                column = column.push(widget::row::with_children([
+-                                                    widget::text::title4(explore_page.title())
+-                                                        .into(),
+-                                                    widget::space::horizontal().into(),
+-                                                    widget::button::text(fl!("see-all"))
+-                                                        .trailing_icon(icon_cache_handle(
+-                                                            "go-next-symbolic",
+-                                                            16,
+-                                                        ))
+-                                                        .on_press(Message::ExplorePage(Some(
+-                                                            *explore_page,
+-                                                        )))
+-                                                        .into(),
+-                                                ]));
+-
+-                                                column = column.push(SearchResult::grid_view(
+-                                                    &results[..results_len],
+-                                                    spacing,
+-                                                    grid_width,
+-                                                    |result_i| {
+-                                                        Message::SelectExploreResult(
+-                                                            *explore_page,
+-                                                            result_i,
+-                                                        )
+-                                                    },
+-                                                ));
+-                                            }
+-                                            _ => {}
+-                                        }
+-                                    }
+-                                    column.into()
++                                    crate::mac_store::discover(self, size.width)
+                                 }
+                             }
+                         }

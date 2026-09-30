@@ -699,15 +699,15 @@ impl cosmic::Application for ControlCenter {
                     return self.close_popup();
                 }
                 self.page = Page::Main;
+                let new_id = window::Id::unique();
                 let open = cosmic::surface::surface_task(cosmic::surface::action::app_popup(
                     |_| Default::default(),
-                    |app: &mut ControlCenter| {
-                        let new_id = window::Id::unique();
+                    move |app: &mut ControlCenter| {
                         app.popup.replace(new_id);
                         app.core.applet.get_popup_settings(app.core.main_window_id().unwrap(), new_id, Some((1, 1)), None, None)
                     },
                     None,
-                ));
+                )).chain(style::blur(new_id));
                 return Task::batch([open, refresh_task()]);
             }
             Message::CloseRequested(id) => {

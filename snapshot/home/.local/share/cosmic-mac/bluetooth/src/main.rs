@@ -110,15 +110,15 @@ impl cosmic::Application for Bluetooth {
                     return self.close_popup();
                 }
                 self.show_nearby = false;
+                let new_id = window::Id::unique();
                 let open = surface::surface_task(surface::action::app_popup(
                     |_| Default::default(),
-                    |app: &mut Bluetooth| {
-                        let new_id = window::Id::unique();
+                    move |app: &mut Bluetooth| {
                         app.popup.replace(new_id);
                         app.core.applet.get_popup_settings(app.core.main_window_id().unwrap(), new_id, Some((1, 1)), None, None)
                     },
                     None,
-                ));
+                )).chain(style::blur(new_id));
                 return Task::batch([open, self.refresh()]);
             }
             Message::CloseRequested(id) => {

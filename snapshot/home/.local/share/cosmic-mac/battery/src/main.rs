@@ -126,10 +126,10 @@ impl cosmic::Application for Battery {
                     return self.close_popup();
                 }
                 self.sampler.sample(); // prime, so the next tick has a baseline
+                let new_id = window::Id::unique();
                 return surface::surface_task(surface::action::app_popup(
                     |_| Default::default(),
-                    |app: &mut Battery| {
-                        let new_id = window::Id::unique();
+                    move |app: &mut Battery| {
                         app.popup.replace(new_id);
                         app.core.applet.get_popup_settings(
                             app.core.main_window_id().unwrap(),
@@ -140,7 +140,7 @@ impl cosmic::Application for Battery {
                         )
                     },
                     None,
-                ));
+                )).chain(style::blur(new_id));
             }
             Message::CloseRequested(id) => {
                 if Some(id) == self.popup {

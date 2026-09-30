@@ -51,6 +51,7 @@ if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-settings 2>/dev/null)" cosmic-settings-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-app-library 2>/dev/null)" cosmic-app-library-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-osd 2>/dev/null)" cosmic-osd-built-version \
+   && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-store 2>/dev/null)" cosmic-store-built-version \
    && [ -x "$HOME/.local/bin/cosmic-mac-control-center" ] && [ -x "$HOME/.local/bin/cosmic-mac-battery" ] \
    && [ -x "$HOME/.local/bin/cosmic-mac-wifi" ] && [ -x "$HOME/.local/bin/cosmic-mac-bluetooth" ] \
    && [ -x "$HOME/.local/bin/cosmic-mac-stats" ] && [ -x "$HOME/.local/bin/cosmic-mac-menu" ]; then
@@ -191,6 +192,8 @@ rebuild_extra cosmic-launcher cosmic-launcher launcher "" cosmic-launcher
 rebuild_extra cosmic-app-library cosmic-app-library app-library "" cosmic-app-library
 # macOS-style system alerts: Log Out / Restart / Shut Down, password prompts (patches/osd.py)
 rebuild_extra cosmic-osd cosmic-osd osd "" cosmic-osd
+# macOS App Store look for the COSMIC Store (patches/store.py)
+rebuild_extra cosmic-store cosmic-store store "" cosmic-store
 
 # --- System Settings: macOS sidebar (patches/settings.py) --------------------
 # AVIF wallpaper previews need dav1d's headers (dnf install dav1d-devel); without

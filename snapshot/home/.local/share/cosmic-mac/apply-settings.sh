@@ -234,11 +234,15 @@ org.freedesktop.impl.portal.Secret=oo7-portal;gnome-keyring;
 PORTALS
 systemctl --user try-restart xdg-desktop-portal 2>/dev/null || true
 
+# The COSMIC Store is called App Store
+sed -e 's/^Name=COSMIC Store$/Name=App Store/' -e '/^Name\[/d' /usr/share/applications/com.system76.CosmicStore.desktop \
+    > ~/.local/share/applications/com.system76.CosmicStore.desktop 2>/dev/null || true
+
 # If COSMIC Files is still installed, keep it out of Launchpad and search
 sed '/^\[Desktop Entry\]/a NoDisplay=true' /usr/share/applications/com.system76.CosmicFiles.desktop \
     > ~/.local/share/applications/com.system76.CosmicFiles.desktop 2>/dev/null || true
 # Files windows get a blurred see-through sidebar (the patched compositor reads this list)
-[ -f ~/.config/cosmic-mac/blur-apps ] || printf '# Apps whose windows are blurred behind, like macOS vibrancy (one app id per line)\norg.gnome.Nautilus\n' > ~/.config/cosmic-mac/blur-apps
+[ -f ~/.config/cosmic-mac/blur-apps ] || printf '# Apps whose windows are blurred behind, like macOS vibrancy (one app id per line)\norg.gnome.Nautilus\ncom.system76.CosmicStore\n' > ~/.config/cosmic-mac/blur-apps
 
 # --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
 "$HOME/.local/share/cosmic-mac/gtk-css.sh"

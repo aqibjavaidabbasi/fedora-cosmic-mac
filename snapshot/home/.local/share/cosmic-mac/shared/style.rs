@@ -62,14 +62,35 @@ pub fn section<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
     text::heading(s.into()).class(theme::Text::Custom(dim_text)).into()
 }
 
-/// The macOS menu-bar popover sheet: fixed width, rounded, frosted theme background.
+/// The frosted tint of the System Settings sidebar (drawn over the compositor blur).
+pub fn glass(t: &Theme) -> Color {
+    if t.cosmic().is_dark {
+        Color::from_rgba(0.15, 0.15, 0.16, 0.94)
+    } else {
+        Color::from_rgba(0.925, 0.925, 0.945, 0.94)
+    }
+}
+
+/// Ask the compositor to blur what is behind a popover (chain it after opening the popup).
+pub fn blur<M: Send + 'static>(id: cosmic::iced::window::Id) -> cosmic::iced::Task<M> {
+    cosmic::iced::runtime::task::effect(cosmic::iced::runtime::Action::PlatformSpecific(
+        cosmic::iced::runtime::platform_specific::Action::Wayland(
+            cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
+                id,
+                Some(vec![cosmic::iced::Rectangle { x: 0., y: 0., width: f32::MAX, height: f32::MAX }]),
+            ),
+        ),
+    ))
+}
+
+/// The macOS menu-bar popover sheet: fixed width, rounded, frosted like the Settings sidebar.
 pub fn popover<'a, M: 'static>(content: impl Into<Element<'a, M>>, width: f32) -> Element<'a, M> {
     let sheet = container(content).width(Length::Fill).class(theme::Container::custom(|t| {
         let bg = t.cosmic().background(t.transparent);
         iced_container::Style {
             text_color: Some(bg.on.into()),
             icon_color: Some(bg.on.into()),
-            background: Some(Background::Color(bg.base.into())),
+            background: Some(Background::Color(glass(t))),
             border: Border { radius: POPOVER_RADIUS.into(), width: 1.0, color: hairline(t) },
             shadow: Shadow::default(),
             snap: true,
