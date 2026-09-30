@@ -31,7 +31,7 @@ sub(r"(    fn update\(&mut self, message: Message\) -> Task<Self::Message> \{\n 
     r"""\1            Message::MacOpen(what) => {
                 let (cmd, args): (&str, &[&str]) = match what {
                     "apps" => ("cosmic-app-library", &[]),
-                    "files" => ("cosmic-files", &[]),
+                    "files" => ("nautilus", &["--new-window"]),
                     "shortcuts" => ("cosmic-settings", &["keyboard"]),
                     _ => ("cosmic-settings", &[]),
                 };

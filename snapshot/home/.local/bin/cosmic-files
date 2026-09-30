@@ -1,0 +1,6 @@
+#!/bin/sh
+# Installed as ~/.local/bin/cosmic-files by cosmic-mac: anything that starts COSMIC Files
+# opens Files (Nautilus) instead. COSMIC Files stays installed because COSMIC needs it
+# (its desktop-icons helper, cosmic-files-applet, is a separate program and still runs).
+[ "$#" -eq 0 ] && exec nautilus --new-window
+exec nautilus --new-window "$@"

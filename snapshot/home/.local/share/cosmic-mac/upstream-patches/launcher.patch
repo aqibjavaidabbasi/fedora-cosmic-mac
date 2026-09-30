@@ -1,5 +1,5 @@
 diff --git a/src/app.rs b/src/app.rs
-index 93e319a..fda764d 100644
+index 93e319a..acbe749 100644
 --- a/src/app.rs
 +++ b/src/app.rs
 @@ -61,6 +61,66 @@ static SCROLLABLE: LazyLock<Id> = LazyLock::new(|| Id::new("scrollable"));
@@ -93,7 +93,7 @@ index 93e319a..fda764d 100644
 +            Message::MacOpen(what) => {
 +                let (cmd, args): (&str, &[&str]) = match what {
 +                    "apps" => ("cosmic-app-library", &[]),
-+                    "files" => ("cosmic-files", &[]),
++                    "files" => ("nautilus", &["--new-window"]),
 +                    "shortcuts" => ("cosmic-settings", &["keyboard"]),
 +                    _ => ("cosmic-settings", &[]),
 +                };

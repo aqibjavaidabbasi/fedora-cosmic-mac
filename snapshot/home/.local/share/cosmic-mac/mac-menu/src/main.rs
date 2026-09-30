@@ -197,7 +197,7 @@ impl cosmic::Application for MacMenu {
             }
             Message::AppAction(action) => {
                 if self.app_id.is_empty() {
-                    spawn("cosmic-files", &[]);
+                    spawn("nautilus", &["--new-window"]);
                 } else {
                     spawn("cosmic-maximize-to-workspace", &["--app", action, &self.app_id]);
                 }
