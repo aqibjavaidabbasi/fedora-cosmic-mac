@@ -5,8 +5,10 @@ A macOS-style COSMIC desktop for Fedora. It survives COSMIC and Fedora updates w
 ## Features
 
 - **Gestures:** three-finger swipe between workspaces with a Mac-like glide. Each maximized app gets its own space, like Mission Control.
-- **Top bar:** transparent Mac-style bar that recolors to match the wallpaper, with a Control Center (Wi-Fi, Bluetooth, Do Not Disturb, sound, brightness, power), a Mac battery item, and a Notification Center (clock, calendar, notifications).
+- **Top bar:** transparent Mac-style bar that recolors to match the wallpaper, laid out like macOS: on the left a logo menu (About, System Settings, App Store, Force Quit, Sleep, Restart, Shut Down, Lock Screen, Log Out) and the focused app's name in bold (Hide, Hide Others, Quit); on the right the extras, Bluetooth, battery, Wi-Fi, a Spotlight magnifier, the Control Center (Wi-Fi, Bluetooth, Do Not Disturb, sound, brightness, power), a Mac battery item, and a Notification Center (clock, calendar, notifications).
 - **Dock and look:** a Mac-style glass Dock (tight icons with hover magnification, running-app dots, a divider, then minimized windows, Downloads and Trash; it hides only on screens showing a maximized window), frosted glass theme, MacTahoe icons, WhiteSur cursor, and Apple's SF Pro font (from your own SF-Pro.dmg; Inter otherwise).
+- **Launchpad:** the App Library opens full screen over the blurred wallpaper with a search pill, 7 x 5 pages of big icons with page dots (scroll or swipe to turn pages), and folders shown as glass tiles with mini icons. It opens from the Launchpad icon at the start of the Dock or Super+A.
+- **Finder:** COSMIC Files has traffic lights on a frosted sidebar and a Finder toolbar: back/forward, the folder name in bold, a grid/list switch, the File/Edit/View/Sort menus, and search.
 - **Spotlight:** Super+Space opens a centered Spotlight Search pill with Apps, Files, Shortcuts and Settings buttons; suggestions appear as you type.
 - **System Settings:** a macOS-style sidebar (search on top, colored icons, grouped pages).
 - **App switcher:** Alt+Tab shows a macOS Command-Tab style row of big app icons, with the selected app's name under it.

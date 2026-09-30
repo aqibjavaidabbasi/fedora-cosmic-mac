@@ -84,7 +84,7 @@ s, n6 = re.subn(
     "        .class(if dock { mac_clear_button() } else { cosmic::theme::Button::AppletIcon })",
     s, count=1)
 s, n7 = re.subn(r"        autosize::autosize\(\n            if ",
-    "        autosize::autosize(\n            mac_dock_shelf(&self.core.applet, std::env::args().nth(1).unwrap_or_default().ends_with(\".Trash\"), if ", s, count=1)
+    "        autosize::autosize(\n            mac_dock_shelf(&self.core.applet, std::env::args().nth(1).unwrap_or_default().ends_with(\".CosmicAppLibrary\"), std::env::args().nth(1).unwrap_or_default().ends_with(\".Trash\"), if ", s, count=1)
 s, n8 = re.subn(r"(                    \.into\(\)\n            \})(,\n            AUTOSIZE_MAIN_ID\.clone\(\),)", r"\1)\2", s, count=1)
 s, n9 = re.subn(r"(\nimpl Button \{\n)", r"""
 /// A Dock button draws no highlight behind its icon, like macOS.
@@ -107,7 +107,7 @@ fn mac_clear_button() -> cosmic::theme::Button {
 }
 
 /// In the bottom Dock, draw this button's slice of the glass shelf under it.
-fn mac_dock_shelf<'a>(applet: &cosmic::applet::Context, round_right: bool, content: cosmic::Element<'a, Msg>) -> cosmic::Element<'a, Msg> {
+fn mac_dock_shelf<'a>(applet: &cosmic::applet::Context, round_left: bool, round_right: bool, content: cosmic::Element<'a, Msg>) -> cosmic::Element<'a, Msg> {
     if !matches!(applet.anchor, PanelAnchor::Bottom) {
         return content;
     }
@@ -121,10 +121,10 @@ fn mac_dock_shelf<'a>(applet: &cosmic::applet::Context, round_right: bool, conte
                 .class(cosmic::theme::Container::custom(move |t| {
                     let mut bg: cosmic::iced::Color = t.cosmic().background(false).base.into();
                     bg.a = 0.55;
-                    let r = if round_right { 18.0 } else { 0.0 };
+                    let (l, r) = (if round_left { 18.0 } else { 0.0 }, if round_right { 18.0 } else { 0.0 });
                     cosmic::iced::widget::container::Style {
                         background: Some(cosmic::iced::Background::Color(bg)),
-                        border: cosmic::iced::Border { radius: [0.0, r, r, 0.0].into(), ..Default::default() },
+                        border: cosmic::iced::Border { radius: [l, r, r, l].into(), ..Default::default() },
                         ..Default::default()
                     }
                 })),

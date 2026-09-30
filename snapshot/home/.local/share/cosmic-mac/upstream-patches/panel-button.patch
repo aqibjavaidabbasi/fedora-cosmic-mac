@@ -27,7 +27,7 @@ index 591fbf3..a45cb85 100644
  
  #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 diff --git a/cosmic-panel-button/src/lib.rs b/cosmic-panel-button/src/lib.rs
-index fe411f8..9c05d34 100644
+index fe411f8..d7db0c2 100644
 --- a/cosmic-panel-button/src/lib.rs
 +++ b/cosmic-panel-button/src/lib.rs
 @@ -20,6 +20,19 @@ use std::{env, fs, process::Command, sync::LazyLock};
@@ -74,7 +74,7 @@ index fe411f8..9c05d34 100644
 +}
 +
 +/// In the bottom Dock, draw this button's slice of the glass shelf under it.
-+fn mac_dock_shelf<'a>(applet: &cosmic::applet::Context, round_right: bool, content: cosmic::Element<'a, Msg>) -> cosmic::Element<'a, Msg> {
++fn mac_dock_shelf<'a>(applet: &cosmic::applet::Context, round_left: bool, round_right: bool, content: cosmic::Element<'a, Msg>) -> cosmic::Element<'a, Msg> {
 +    if !matches!(applet.anchor, PanelAnchor::Bottom) {
 +        return content;
 +    }
@@ -88,10 +88,10 @@ index fe411f8..9c05d34 100644
 +                .class(cosmic::theme::Container::custom(move |t| {
 +                    let mut bg: cosmic::iced::Color = t.cosmic().background(false).base.into();
 +                    bg.a = 0.55;
-+                    let r = if round_right { 18.0 } else { 0.0 };
++                    let (l, r) = (if round_left { 18.0 } else { 0.0 }, if round_right { 18.0 } else { 0.0 });
 +                    cosmic::iced::widget::container::Style {
 +                        background: Some(cosmic::iced::Background::Color(bg)),
-+                        border: cosmic::iced::Border { radius: [0.0, r, r, 0.0].into(), ..Default::default() },
++                        border: cosmic::iced::Border { radius: [l, r, r, l].into(), ..Default::default() },
 +                        ..Default::default()
 +                    }
 +                })),
@@ -164,7 +164,7 @@ index fe411f8..9c05d34 100644
          // use Override::Text to override this behavior
          autosize::autosize(
 -            if self.desktop.icon.is_some()
-+            mac_dock_shelf(&self.core.applet, std::env::args().nth(1).unwrap_or_default().ends_with(".Trash"), if (self.desktop.icon.is_some() || self.config.icon.is_some())
++            mac_dock_shelf(&self.core.applet, std::env::args().nth(1).unwrap_or_default().ends_with(".CosmicAppLibrary"), std::env::args().nth(1).unwrap_or_default().ends_with(".Trash"), if (self.desktop.icon.is_some() || self.config.icon.is_some())
                  && matches!(
                      self.core.applet.anchor,
                      PanelAnchor::Left | PanelAnchor::Right

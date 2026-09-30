@@ -3,8 +3,8 @@
 Run from the cosmic-applets source root. Exits 1 if the code no longer matches.
 
 The Dock panel itself is fully transparent; each dock applet draws its own slice
-of a glass "shelf" along the bottom of its surface (the app list rounds the left
-end, the Trash button the right end). Everything above the shelf is empty
+of a glass "shelf" along the bottom of its surface (the Launchpad button rounds the
+left end, the Trash button the right end). Everything above the shelf is empty
 headroom, so hovered icons can grow up out of the shelf like on macOS.
 
 - Icons at 80% of the panel's icon size, sitting 8px above the shelf's bottom,
@@ -192,13 +192,13 @@ sub(r"(        self\.core\n            \.applet\n            \.autosize_window\(
         let shelf: Element<_> = if is_horizontal {
             Column::new()
                 .push(vertical_space().height(Length::Fill))
-                .push(container(horizontal_space()).width(Length::Fill).height(Length::Fixed(shelf_h)).class(mac_shelf(true, false)))
+                .push(container(horizontal_space()).width(Length::Fill).height(Length::Fixed(shelf_h)).class(mac_shelf(false, false)))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()
         } else {
             Row::new()
-                .push(container(vertical_space()).height(Length::Fill).width(Length::Fixed(shelf_h)).class(mac_shelf(true, false)))
+                .push(container(vertical_space()).height(Length::Fill).width(Length::Fixed(shelf_h)).class(mac_shelf(false, false)))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()

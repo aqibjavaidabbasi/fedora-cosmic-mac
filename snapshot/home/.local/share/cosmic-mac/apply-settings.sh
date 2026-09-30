@@ -58,6 +58,7 @@ put $D/spacing 0
 put $D/margin 6
 put $D/plugins_wings 'Some(([], []))'
 put $D/plugins_center 'Some([
+    "com.system76.CosmicPanelAppButton",
     "com.system76.CosmicAppList",
     "com.aqib.DockSeparator",
     "com.aqib.DockDownloads",
@@ -68,20 +69,33 @@ put $D/plugins_center 'Some([
 P=$C/com.system76.CosmicPanel.Panel/v1
 put $P/opacity 0.2
 put $P/plugins_center 'Some([])'
+# macOS order: logo menu + app name on the left; extras, Bluetooth, battery,
+# Wi-Fi, Spotlight, Control Center and the clock on the right.
 put $P/plugins_wings 'Some(([
-    "com.system76.CosmicPanelAppButton",
-    "com.system76.CosmicPanelLauncherButton",
-    "com.system76.CosmicPanelWorkspacesButton",
+    "com.aqib.CosmicMacMenu",
 ], [
-    "com.aqib.CosmicMacBluetooth",
     "com.aqib.CosmicMacStats",
     "com.github.codevardhan.caffeine-applet",
+    "com.aqib.CosmicMacBluetooth",
     "com.aqib.CosmicMacBattery",
     "com.aqib.CosmicMacWifi",
+    "com.system76.CosmicPanelLauncherButton",
     "com.aqib.CosmicMacControlCenter",
     "com.system76.CosmicAppletNotifications",
 ]))'
 put $C/com.system76.CosmicAppletTime/v1/show_date_in_top_panel true
+
+# Panel buttons: a magnifier for Spotlight in the top bar, and a Launchpad icon
+# at the start of the Dock (kept if already set, e.g. from Edit Controls).
+B=$C/com.system76.CosmicPanelButton/v1/configs
+[ -s "$B" ] || put "$B" '{
+}'
+setbtn() { grep -qF "\"$1\"" "$B" || sed -i "0,/{/s||{\n    \"$1\": $2,|" "$B"; }
+setbtn "*/com.system76.CosmicLauncher" '(force_presentation: Some(Icon), icon: Some("system-search-symbolic"))'
+LP=$HOME/.local/share/cosmic-mac/icons/launchpad.svg
+for d in Dock Dock-DP-1 Dock-eDP-1 Dock-HDMI-A-1; do
+    setbtn "$d/com.system76.CosmicAppLibrary" "(force_presentation: Some(Icon), icon: Some(\"$LP\"))"
+done
 put $C/com.system76.CosmicAppletTime/v1/show_weekday true
 
 # --- Glass theme: frosted blur, rounder corners, no active-window outline ---

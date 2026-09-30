@@ -1,13 +1,12 @@
 Some(([
-    "com.system76.CosmicPanelAppButton",
-    "com.system76.CosmicPanelLauncherButton",
-    "com.system76.CosmicPanelWorkspacesButton",
+    "com.aqib.CosmicMacMenu",
 ], [
-    "com.aqib.CosmicMacBluetooth",
     "com.aqib.CosmicMacStats",
     "com.github.codevardhan.caffeine-applet",
+    "com.aqib.CosmicMacBluetooth",
     "com.aqib.CosmicMacBattery",
     "com.aqib.CosmicMacWifi",
+    "com.system76.CosmicPanelLauncherButton",
     "com.aqib.CosmicMacControlCenter",
     "com.system76.CosmicAppletNotifications",
 ]))

@@ -20,10 +20,12 @@ cosmic-panel cosmic-panel-built-version cosmic-panel Top bar recolor
 cosmic-workspaces cosmic-workspaces-built-version cosmic-workspaces Centered overview thumbnails
 cosmic-launcher cosmic-launcher-built-version cosmic-launcher Spotlight launcher
 cosmic-settings cosmic-settings-built-version cosmic-settings Mac System Settings sidebar
+cosmic-app-library cosmic-app-library-built-version cosmic-app-library Launchpad
+cosmic-files cosmic-files-built-version cosmic-files Finder look for Files
 EOF
 
 echo "Helper apps:"
-for b in cosmic-mac-control-center cosmic-mac-battery cosmic-mac-wifi cosmic-mac-bluetooth cosmic-mac-stats cosmic-mac-separator cosmic-maximize-to-workspace; do
+for b in cosmic-mac-control-center cosmic-mac-battery cosmic-mac-wifi cosmic-mac-bluetooth cosmic-mac-stats cosmic-mac-menu cosmic-mac-separator cosmic-maximize-to-workspace; do
     f=$HOME/.local/bin/$b
     if [ ! -x "$f" ]; then warn "$b missing -> run $D/rebuild.sh"
     elif ldd "$f" 2>/dev/null | grep -q "not found"; then warn "$b needs a rebuild -> run $D/rebuild.sh --force"
