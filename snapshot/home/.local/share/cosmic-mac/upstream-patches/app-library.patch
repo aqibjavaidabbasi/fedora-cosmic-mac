@@ -1,0 +1,492 @@
+diff --git a/src/app.rs b/src/app.rs
+index 11de300..24c6c68 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -238,6 +238,9 @@ pub enum SurfaceState {
+     WaitingToBeShown,
+ }
+ 
++#[path = "mac_launchpad.rs"]
++mod mac_launchpad;
++
+ struct CosmicAppLibrary {
+     search_value: String,
+     entry_path_input: Vec<Arc<DesktopEntryData>>,
+@@ -262,6 +265,9 @@ struct CosmicAppLibrary {
+     overlap: HashMap<String, Rectangle>,
+     margin: f32,
+     size: iced::Size,
++    mac_page: usize,
++    mac_wheel: f32,
++    mac_flip: Option<Instant>,
+     needs_clear: bool,
+     focused_id: Option<widget::Id>,
+     entry_ids: Vec<widget::Id>,
+@@ -299,6 +305,9 @@ impl Default for CosmicAppLibrary {
+             app_list_config: Default::default(),
+             overlap: Default::default(),
+             margin: Default::default(),
++            mac_page: 0,
++            mac_wheel: 0.,
++            mac_flip: None,
+             size: Size::ZERO,
+             needs_clear: Default::default(),
+             focused_id: Default::default(),
+@@ -375,6 +384,7 @@ impl CosmicAppLibrary {
+             self.search_value = "".to_string();
+             self.scroll_offset = 0.0;
+             self.cur_group = None;
++            self.mac_page = 0;
+             self.load_apps();
+             self.needs_clear = true;
+             let fetch_gpus = Task::perform(try_get_gpus(), |gpus| {
+@@ -423,7 +433,7 @@ impl CosmicAppLibrary {
+         let margin = self.layer_padding();
+         cmds.push(set_padding::<()>(SurfaceId::RESERVED, margin).discard());
+         cmds.push(
+-            if self.core.system_theme().cosmic().frosted_system_interface {
++            if true {
+                 task::effect(Action::PlatformSpecific(
+                     platform_specific::Action::Wayland(
+                         cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
+@@ -454,10 +464,10 @@ impl CosmicAppLibrary {
+     fn layer_padding(&self) -> IcedMargin {
+         IcedMargin {
+             #[allow(clippy::cast_possible_truncation)]
+-            top: self.margin as i32 + 16,
+-            left: ((self.size.width - 1200.) / 2.).max(0.) as i32,
+-            right: ((self.size.width - 1200.) / 2.).max(0.) as i32,
+-            bottom: (self.size.height - 690. - 16. - self.margin).max(0.) as i32,
++            top: self.margin as i32,
++            left: 0,
++            right: 0,
++            bottom: 0,
+         }
+     }
+ 
+@@ -525,6 +535,8 @@ enum Message {
+     AppListConfig(AppListConfig),
+     Opened(Size, SurfaceId),
+     Overlap(OverlapNotifyEvent),
++    MacPage(usize),
++    MacWheel(f32),
+     Output(OutputEvent),
+ }
+ 
+@@ -703,6 +715,29 @@ impl cosmic::Application for CosmicAppLibrary {
+ 
+     fn update(&mut self, message: Message) -> Task<Self::Message> {
+         match message {
++            Message::MacPage(p) => {
++                self.mac_page = p;
++            }
++            Message::MacWheel(d) => {
++                let now = Instant::now();
++                if self.mac_flip.is_some_and(|t| now.duration_since(t) < Duration::from_millis(450)) {
++                    self.mac_wheel = 0.;
++                    return Task::none();
++                }
++                self.mac_wheel += d;
++                if self.mac_wheel.abs() >= 40. {
++                    let pages = mac_launchpad::pages(self);
++                    if self.mac_wheel < 0. {
++                        if self.mac_page + 1 < pages {
++                            self.mac_page += 1;
++                        }
++                    } else {
++                        self.mac_page = self.mac_page.saturating_sub(1);
++                    }
++                    self.mac_wheel = 0.;
++                    self.mac_flip = Some(now);
++                }
++            }
+             Message::Activate => {
+                 return self.activate();
+             }
+@@ -720,6 +755,7 @@ impl cosmic::Application for CosmicAppLibrary {
+                     .as_ref()
+                     .and_then(|focused| self.entry_ids.iter().position(|i| i == focused))
+                     .unwrap_or(0);
++                self.mac_page = i / mac_launchpad::PER_PAGE;
+                 let y =
+                     ((i / 7) as f32 / ((self.entry_path_input.len() / 7) as f32).max(1.)).max(0.0);
+ 
+@@ -829,6 +865,7 @@ impl cosmic::Application for CosmicAppLibrary {
+             }
+             Message::InputChanged(value) => {
+                 self.search_value = value;
++                self.mac_page = 0;
+                 return self.filter_apps();
+             }
+             Message::Layer(e, id) => {
+@@ -905,6 +942,7 @@ impl cosmic::Application for CosmicAppLibrary {
+                 self.edit_name = None;
+                 self.search_value.clear();
+                 self.cur_group = group;
++                self.mac_page = 0;
+                 self.scroll_offset = 0.0;
+                 self.scrollable_id = Id::new(format!("group-{}", group.unwrap_or(usize::MAX)));
+                 let mut cmds = vec![self.filter_apps()];
+@@ -1466,309 +1504,7 @@ impl cosmic::Application for CosmicAppLibrary {
+             return autosize(dialog, DELETE_GROUP_AUTOSIZE_ID.clone()).into();
+         }
+ 
+-        let cur_group = self.current_group();
+-        let top_row = if self.cur_group.is_none() {
+-            row![
+-                container(
+-                    search_input(SEARCH_PLACEHOLDER.as_str(), self.search_value.as_str())
+-                        .on_input(Message::InputChanged)
+-                        .on_paste(Message::InputChanged)
+-                        .on_submit(|_| Message::StartCurAppFocus)
+-                        .style(TextInput::Search)
+-                        .width(Length::Fixed(400.0))
+-                        .size(14)
+-                        .id(SEARCH_ID.clone())
+-                )
+-                .align_y(Vertical::Center)
+-                .height(Length::Fixed(96.0))
+-            ]
+-            .align_y(Alignment::Center)
+-            .spacing(space_xxs)
+-        } else {
+-            row![
+-                space::horizontal().width(Length::FillPortion(1)),
+-                if let Some(edit_name) = self.edit_name.as_ref() {
+-                    container(
+-                        text_input(cur_group.name(), edit_name)
+-                            .on_input(Message::EditName)
+-                            .on_paste(Message::EditName)
+-                            .on_clear(Message::EditName(String::new()))
+-                            .on_submit(|_| Message::SubmitName)
+-                            .id(EDIT_GROUP_ID.clone())
+-                            .width(Length::Fixed(200.0))
+-                            .size(14),
+-                    )
+-                } else {
+-                    container(text(cur_group.name()).size(24))
+-                },
+-                row![
+-                    space::horizontal(),
+-                    tooltip(
+-                        {
+-                            let mut b = button::custom(
+-                                icon::icon(icon::from_name("edit-symbolic").into())
+-                                    .width(Length::Fixed(32.0))
+-                                    .height(Length::Fixed(32.0)),
+-                            )
+-                            .padding(space_xs)
+-                            .class(Button::Icon);
+-                            if self.edit_name.is_none() {
+-                                b = b.on_press(Message::StartEditName(cur_group.name()));
+-                            }
+-                            container(b)
+-                                .height(Length::Fixed(96.0))
+-                                .align_y(Vertical::Center)
+-                        },
+-                        text(fl!("rename")),
+-                        tooltip::Position::Bottom
+-                    ),
+-                    tooltip(
+-                        container(
+-                            button::custom(
+-                                icon::icon(icon::from_name("edit-delete-symbolic").into())
+-                                    .width(Length::Fixed(32.0))
+-                                    .height(Length::Fixed(32.0)),
+-                            )
+-                            .padding(space_xs)
+-                            .class(Button::Icon)
+-                            .on_press_maybe(self.cur_group.map(Message::Delete))
+-                        )
+-                        .height(Length::Fixed(96.0))
+-                        .align_y(Vertical::Center),
+-                        text(fl!("delete")),
+-                        tooltip::Position::Bottom
+-                    )
+-                ]
+-                .spacing(space_xxs)
+-                .width(Length::FillPortion(1))
+-            ]
+-            .padding([0, space_l])
+-            .align_y(Alignment::Center)
+-        };
+-
+-        // TODO grid widget in libcosmic
+-        let app_grid_list: Vec<_> = self
+-            .entry_path_input
+-            .iter()
+-            .zip(self.entry_ids.iter())
+-            .zip(self.entry_icon_handles.iter())
+-            .enumerate()
+-            .map(|(i, ((entry, id), icon_handle))| {
+-                let gpu_idx = self.gpus.as_ref().map(|gpus| {
+-                    if entry.prefers_dgpu {
+-                        gpus.iter().position(|gpu| !gpu.default).unwrap_or(0)
+-                    } else {
+-                        gpus.iter().position(|gpu| gpu.default).unwrap_or(0)
+-                    }
+-                });
+-                let dup = entry
+-                    .path
+-                    .as_ref()
+-                    .and_then(|path| self.duplicates.get(path));
+-                let selected = self.menu.is_some_and(|m| m == i);
+-
+-                let b = ApplicationButton::new(
+-                    id.clone(),
+-                    &entry.name,
+-                    icon_handle.clone(),
+-                    &entry.path,
+-                    move |rect| Message::OpenContextMenu(rect, i),
+-                    if self.menu.is_none() {
+-                        Some(Message::ActivateApp(i, gpu_idx))
+-                    } else if selected {
+-                        Some(Message::CloseContextMenu)
+-                    } else {
+-                        None
+-                    },
+-                    // TODO add icon and text if duplicated
+-                    dup,
+-                    selected,
+-                    self.menu.is_none().then_some(Message::StartDrag(i)),
+-                    self.menu.is_none().then_some(Message::FinishDrag(false)),
+-                    self.menu.is_none().then_some(Message::CancelDrag),
+-                );
+-
+-                b.into()
+-            })
+-            .chunks(7)
+-            .into_iter()
+-            .map(|row_chunk| {
+-                let mut new_row = row_chunk.collect_vec();
+-                let missing = 7 - new_row.len();
+-                if missing > 0 {
+-                    new_row.push(
+-                        iced::widget::space::horizontal()
+-                            .width(Length::FillPortion(missing.try_into().unwrap()))
+-                            .into(),
+-                    );
+-                }
+-                row(new_row).spacing(space_xxs).into()
+-            })
+-            .collect();
+-
+-        let app_scrollable = container(
+-            scrollable(
+-                column(app_grid_list)
+-                    .width(Length::Fill)
+-                    .spacing(space_xxs)
+-                    // padding on top needed to avoid focus highlight clipping
+-                    .padding([4, space_xxl, space_xxs, space_xxl]),
+-            )
+-            .on_scroll(|viewport| Message::ScrollYOffset(viewport.absolute_offset().y))
+-            .id(self.scrollable_id.clone())
+-            .height(Length::Fill),
+-        )
+-        .max_height(444.0);
+-
+-        // TODO use the spacing variables from the theme
+-        let (group_icon_size, h_padding, group_width) = if self.config.groups.len() + 1 > 15 {
+-            (16.0, space_xxs, 96.0)
+-        } else {
+-            (32.0, space_s, 128.0)
+-        };
+-        let group_height =
+-            group_icon_size + 21.0 + (space_none as f32) + (space_xxs as f32) + (space_s as f32);
+-
+-        let build_group_button = |group_ref: Option<usize>, group: &crate::app_group::AppGroup| {
+-            let is_active = self.offer_group == Some(group_ref)
+-                || (self.cur_group == group_ref && self.offer_group.is_none());
+-            dnd_destination_for_data::<AppletString, Message>(
+-                button::custom(
+-                    column![
+-                        container(
+-                            icon::icon(from_name(group.icon.clone()).into())
+-                                .width(Length::Fixed(group_icon_size))
+-                                .height(Length::Fixed(group_icon_size))
+-                        )
+-                        .padding(space_xxs),
+-                        text::body(group.name()).width(Length::Shrink)
+-                    ]
+-                    .align_x(Alignment::Center)
+-                    .width(Length::Fill),
+-                )
+-                .height(Length::Fixed(group_height))
+-                .width(Length::Fixed(group_width))
+-                .class(if is_active {
+-                    Button::Custom {
+-                        active: Box::new(|focused, theme| {
+-                            theme.pressed(focused, false, &Button::IconVertical)
+-                        }),
+-                        disabled: Box::new(|theme| theme.disabled(&Button::IconVertical)),
+-                        hovered: Box::new(|focused, theme| {
+-                            theme.hovered(focused, false, &Button::IconVertical)
+-                        }),
+-                        pressed: Box::new(|focused, theme| {
+-                            theme.pressed(focused, false, &Button::IconVertical)
+-                        }),
+-                    }
+-                } else {
+-                    Button::IconVertical
+-                })
+-                .padding([space_none, h_padding, space_xxs, h_padding])
+-                .on_press_maybe(
+-                    self.menu
+-                        .is_none()
+-                        .then_some(Message::SelectGroup(group_ref)),
+-                ),
+-                move |data, _| {
+-                    Message::FinishDndOffer(
+-                        group_ref,
+-                        data.and_then(|data| load_desktop_file(&[], data.0)),
+-                    )
+-                },
+-            )
+-            .drag_id(group_ref.map(|i| i as u64 + 1).unwrap_or(0))
+-            .on_enter(move |_, _, _| Message::StartDndOffer(group_ref))
+-            .on_leave(move || Message::LeaveDndOffer(group_ref))
+-        };
+-
+-        let add_group_btn = button::custom(
+-            column![
+-                container(
+-                    icon::icon(icon::from_name("folder-new-symbolic").into())
+-                        .width(Length::Fixed(group_icon_size))
+-                        .height(Length::Fixed(group_icon_size))
+-                )
+-                .padding(space_xxs),
+-                text::body(ADD_GROUP.as_str()).width(Length::Shrink)
+-            ]
+-            .align_x(Alignment::Center)
+-            .width(Length::Fill),
+-        )
+-        .height(Length::Fixed(group_height))
+-        .width(Length::Fixed(group_width))
+-        .class(theme::Button::IconVertical)
+-        .padding([space_none, h_padding, space_xxs, h_padding])
+-        .on_press(Message::StartNewGroup);
+-
+-        let home = AppLibraryConfig::home();
+-        let group_row = self
+-            .config
+-            .groups
+-            .iter()
+-            .enumerate()
+-            .fold(
+-                reorderable_flex_row::<GroupRowKey, Message>(Message::ReorderGroup)
+-                    .spacing(space_xxs)
+-                    .padding([space_s, space_none])
+-                    .push_locked(GroupRowKey::Home, build_group_button(None, home)),
+-                |row, (i, group)| {
+-                    let key = self.group_keys.get(i).copied().unwrap_or(i as u64);
+-                    row.push(GroupRowKey::Custom(key), build_group_button(Some(i), group))
+-                },
+-            )
+-            .push_locked(GroupRowKey::NewGroup, add_group_btn);
+-
+-        let content = column![
+-            top_row,
+-            app_scrollable,
+-            container(horizontal_rule(1))
+-                .padding([space_none, space_xxl])
+-                .width(Length::Fill),
+-            group_row
+-        ]
+-        .align_x(Alignment::Center);
+-
+-        let window = container(content)
+-            .height(Length::Fixed(690.))
+-            .max_height(690)
+-            .max_width(1200.0)
+-            .class(theme::Container::Custom(Box::new(|theme| {
+-                let t = theme.cosmic();
+-                let radii = t.radius_s().map(|x| if x < 4.0 { x } else { x + 4.0 });
+-
+-                container::Style {
+-                    text_color: Some(t.on_bg_color().into()),
+-                    icon_color: Some(t.on_bg_color().into()),
+-                    background: Some(Color::from(t.background(theme.transparent).base).into()),
+-                    border: Border {
+-                        radius: radii.into(),
+-                        width: 1.0,
+-                        color: t.bg_divider().into(),
+-                    },
+-                    shadow: Shadow::default(),
+-                    snap: true,
+-                }
+-            })))
+-            .center_x(Length::Fill)
+-            .width(Length::Fixed(1200.));
+-        stack![
+-            mouse_area(
+-                container(space::horizontal().width(Length::Fill))
+-                    .width(Length::Fill)
+-                    .height(Length::Fill)
+-            )
+-            .on_press(Message::Hide),
+-            column!(
+-                space::vertical().height(Length::Fixed(self.margin + 16.)),
+-                mouse_area(window).on_press(Message::CloseContextMenu),
+-            )
+-            .align_x(Alignment::Center)
+-            .width(Length::Fill)
+-        ]
+-        .width(Length::Fill)
+-        .height(Length::Fill)
+-        .into()
++        mac_launchpad::view(self)
+     }
+ 
+     fn subscription(&self) -> Subscription<Message> {
+@@ -1831,6 +1567,14 @@ impl cosmic::Application for CosmicAppLibrary {
+                     }
+                     _ => None,
+                 },
++                cosmic::iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta })
++                    if id == SurfaceId::RESERVED =>
++                {
++                    Some(Message::MacWheel(match delta {
++                        iced::mouse::ScrollDelta::Lines { x, y } => (if y.abs() >= x.abs() { y } else { x }) * 60.,
++                        iced::mouse::ScrollDelta::Pixels { x, y } => if y.abs() >= x.abs() { y } else { x },
++                    }))
++                }
+                 cosmic::iced::Event::Window(WindowEvent::Opened { position: _, size }) => {
+                     Some(Message::Opened(size, id))
+                 }
+diff --git a/src/widgets/application.rs b/src/widgets/application.rs
+index 527b820..f290149 100644
+--- a/src/widgets/application.rs
++++ b/src/widgets/application.rs
+@@ -79,7 +79,7 @@ impl<'a, Message: Clone + 'static> ApplicationButton<'a, Message> {
+             if let Some((source, ..)) = source {
+                 format!("{name:.17}... ({source})")
+             } else {
+-                format!("{name:.24}...")
++                format!("{name:.18}...")
+             }
+         } else if let Some((source, ..)) = source {
+             format!("{name} ({source})")
+@@ -93,11 +93,11 @@ impl<'a, Message: Clone + 'static> ApplicationButton<'a, Message> {
+                     icon_handle
+                         .clone()
+                         .icon()
+-                        .width(Length::Fixed(72.0))
+-                        .height(Length::Fixed(72.0)),
++                        .width(Length::Fixed(88.0))
++                        .height(Length::Fixed(88.0)),
+                     container(
+                         text(name)
+-                            .size(14.0)
++                            .size(13.0)
+                             .width(Length::Shrink)
+                             .align_x(text::Alignment::Center)
+                     )
+@@ -106,7 +106,7 @@ impl<'a, Message: Clone + 'static> ApplicationButton<'a, Message> {
+                     .height(Length::Fixed(40.0))
+                 ]
+                 .width(Length::Fixed(120.0))
+-                .height(Length::Fixed(120.0))
++                .height(Length::Fixed(136.0))
+                 .spacing(space_xxs)
+                 .align_x(Alignment::Center)
+                 .width(Length::Fill),

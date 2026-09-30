@@ -58,30 +58,51 @@ put $D/spacing 0
 put $D/margin 6
 put $D/plugins_wings 'Some(([], []))'
 put $D/plugins_center 'Some([
+    "com.system76.CosmicPanelAppButton",
     "com.system76.CosmicAppList",
     "com.aqib.DockSeparator",
     "com.aqib.DockDownloads",
     "com.aqib.DockTrash",
 ])'
 
+# Dock: Files (Nautilus) instead of COSMIC Files; other pinned apps kept
+AL=$C/com.system76.CosmicAppList/v1/favorites
+[ -f "$AL" ] || cp /usr/share/cosmic/com.system76.CosmicAppList/v1/favorites "$AL" 2>/dev/null || true
+[ ! -f "$AL" ] || sed -i 's/"com.system76.CosmicFiles"/"org.gnome.Nautilus"/' "$AL"
+
 # --- Top bar: Mac layout, clock on the right, nearly transparent -----------
 P=$C/com.system76.CosmicPanel.Panel/v1
 put $P/opacity 0.2
+put $P/size S          # 20px icons, like the macOS menu bar
+put $P/spacing 0
 put $P/plugins_center 'Some([])'
+# macOS order: logo menu + app name on the left; extras, Bluetooth, battery,
+# Wi-Fi, Spotlight, Control Center and the clock on the right.
 put $P/plugins_wings 'Some(([
-    "com.system76.CosmicPanelAppButton",
-    "com.system76.CosmicPanelLauncherButton",
-    "com.system76.CosmicPanelWorkspacesButton",
+    "com.aqib.CosmicMacMenu",
 ], [
-    "com.aqib.CosmicMacBluetooth",
     "com.aqib.CosmicMacStats",
     "com.github.codevardhan.caffeine-applet",
+    "com.aqib.CosmicMacBluetooth",
     "com.aqib.CosmicMacBattery",
     "com.aqib.CosmicMacWifi",
+    "com.system76.CosmicPanelLauncherButton",
     "com.aqib.CosmicMacControlCenter",
     "com.system76.CosmicAppletNotifications",
 ]))'
 put $C/com.system76.CosmicAppletTime/v1/show_date_in_top_panel true
+
+# Panel buttons: a magnifier for Spotlight in the top bar, and a Launchpad icon
+# at the start of the Dock (kept if already set, e.g. from Edit Controls).
+B=$C/com.system76.CosmicPanelButton/v1/configs
+[ -s "$B" ] || put "$B" '{
+}'
+setbtn() { grep -qF "\"$1\"" "$B" || sed -i "0,/{/s||{\n    \"$1\": $2,|" "$B"; }
+setbtn "*/com.system76.CosmicLauncher" '(force_presentation: Some(Icon), icon: Some("system-search-symbolic"))'
+LP=$HOME/.local/share/cosmic-mac/icons/launchpad.svg
+for d in Dock Dock-DP-1 Dock-eDP-1 Dock-HDMI-A-1; do
+    setbtn "$d/com.system76.CosmicAppLibrary" "(force_presentation: Some(Icon), icon: Some(\"$LP\"))"
+done
 put $C/com.system76.CosmicAppletTime/v1/show_weekday true
 
 # --- Glass theme: frosted blur, rounder corners, no active-window outline ---
@@ -200,5 +221,14 @@ for d in "$C"/com.system76.CosmicPanel.Panel-*/v1; do
 done
 # Bars showing the desktop: re-tint with the wallpaper color.
 "$HOME/.local/share/cosmic-mac/panel-contrast.py" || true
+
+# COSMIC Files stays installed (COSMIC needs it) but is hidden from Launchpad and search
+sed '/^\[Desktop Entry\]/a NoDisplay=true' /usr/share/applications/com.system76.CosmicFiles.desktop \
+    > ~/.local/share/applications/com.system76.CosmicFiles.desktop 2>/dev/null || true
+# Files windows get a blurred see-through sidebar (the patched compositor reads this list)
+[ -f ~/.config/cosmic-mac/blur-apps ] || printf '# Apps whose windows are blurred behind, like macOS vibrancy (one app id per line)\norg.gnome.Nautilus\n' > ~/.config/cosmic-mac/blur-apps
+
+# --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
+"$HOME/.local/share/cosmic-mac/gtk-css.sh"
 
 echo "COSMIC customizations applied."

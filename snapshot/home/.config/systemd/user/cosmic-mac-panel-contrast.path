@@ -1,5 +1,5 @@
 [Unit]
-Description=Watch the COSMIC wallpaper and Dock settings
+Description=Watch the COSMIC wallpaper, Dock settings and generated GTK theme
 
 [Path]
 PathChanged=%h/.config/cosmic/com.system76.CosmicBackground/v1
@@ -7,6 +7,10 @@ PathModified=%h/.config/cosmic/com.system76.CosmicBackground/v1
 
 PathChanged=%h/.config/cosmic/com.system76.CosmicPanel.Dock/v1
 PathChanged=%h/.config/cosmic/com.system76.CosmicPanel/v1/entries
+
+# COSMIC rewrites these on theme changes; gtk-css.sh re-adds the Files sidebar style
+PathChanged=%h/.config/gtk-4.0/cosmic/dark.css
+PathChanged=%h/.config/gtk-4.0/cosmic/light.css
 
 [Install]
 WantedBy=default.target

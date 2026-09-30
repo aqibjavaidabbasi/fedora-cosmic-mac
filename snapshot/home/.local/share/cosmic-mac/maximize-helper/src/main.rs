@@ -112,6 +112,11 @@ struct App {
     last_capture: HashMap<String, (Toplevel, String, Instant)>,
     /// Per display: what its top bar currently shows.
     panel_modes: HashMap<String, PanelMode>,
+    /// Last focused app written for the top bar's app menu ("app_id\ntitle").
+    focused: String,
+    /// One-shot command from the top bar's app menu: (action, app_id).
+    cli: Option<(String, String)>,
+    cli_done: bool,
 }
 
 fn is_big(info: &ToplevelInfo) -> bool {
@@ -819,22 +824,71 @@ impl ScreencopyHandler for App {
 // Wayland plumbing
 // ---------------------------------------------------------------------------
 
+impl App {
+    /// Tell the top bar's app menu which app is focused (only while one is).
+    fn write_focused(&mut self) {
+        let Some(info) = self
+            .toplevel_info_state
+            .toplevels()
+            .find(|i| i.state.contains(&TState::Activated))
+        else {
+            return;
+        };
+        let now = format!("{}\n{}\n", info.app_id, info.title);
+        if now != self.focused {
+            let dir = format!("{}/cosmic-mac", std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into()));
+            let _ = fs::create_dir_all(&dir);
+            let _ = fs::write(format!("{dir}/focused.tmp"), &now);
+            let _ = fs::rename(format!("{dir}/focused.tmp"), format!("{dir}/focused"));
+            self.focused = now;
+        }
+    }
+
+    /// `--app quit|hide|hide-others <app_id>` from the top bar's app menu.
+    fn run_cli(&mut self) {
+        let Some((action, app_id)) = self.cli.clone() else { return };
+        let manager = &self.toplevel_manager_state.manager;
+        for info in self.toplevel_info_state.toplevels() {
+            let Some(cosmic) = info.cosmic_toplevel.as_ref() else { continue };
+            let mine = info.app_id == app_id;
+            match action.as_str() {
+                "quit" if mine => manager.close(cosmic),
+                "hide" if mine => manager.set_minimized(cosmic),
+                "hide-others" if !mine && !info.state.contains(&TState::Sticky) => manager.set_minimized(cosmic),
+                _ => {}
+            }
+        }
+        self.cli_done = true;
+    }
+}
+
 impl ToplevelInfoHandler for App {
     fn toplevel_info_state(&mut self) -> &mut ToplevelInfoState {
         &mut self.toplevel_info_state
     }
 
     fn new_toplevel(&mut self, _: &Connection, _: &QueueHandle<Self>, toplevel: &Toplevel) {
+        if self.cli.is_some() {
+            return;
+        }
         self.handle(toplevel);
         self.update_panels();
+        self.write_focused();
     }
 
     fn update_toplevel(&mut self, _: &Connection, _: &QueueHandle<Self>, toplevel: &Toplevel) {
+        if self.cli.is_some() {
+            return;
+        }
         self.handle(toplevel);
         self.update_panels();
+        self.write_focused();
     }
 
     fn toplevel_closed(&mut self, _: &Connection, _: &QueueHandle<Self>, toplevel: &Toplevel) {
+        if self.cli.is_some() {
+            return;
+        }
         let tracked = self.tracked.remove(toplevel);
         if let Some(info) = self.toplevel_info_state.info(toplevel).cloned() {
             // Closing a full-screen app returns to that display's desktop, like macOS.
@@ -857,6 +911,9 @@ impl ToplevelInfoHandler for App {
     }
 
     fn info_done(&mut self, _: &Connection, _: &QueueHandle<Self>) {
+        if self.cli.is_some() {
+            return self.run_cli();
+        }
         if !self.ready {
             self.ready = true;
             self.ensure_panels();
@@ -950,10 +1007,22 @@ fn main() {
         capture: None,
         last_capture: HashMap::new(),
         panel_modes: HashMap::new(),
+        focused: String::new(),
+        cli: None,
+        cli_done: false,
     };
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 4 && args[1] == "--app" {
+        app.cli = Some((args[2].clone(), args[3].clone()));
+    }
 
     loop {
         queue.blocking_dispatch(&mut app).expect("Wayland connection lost");
+        if app.cli_done {
+            let _ = conn.flush();
+            let _ = queue.roundtrip(&mut app);
+            break;
+        }
     }
 }
 

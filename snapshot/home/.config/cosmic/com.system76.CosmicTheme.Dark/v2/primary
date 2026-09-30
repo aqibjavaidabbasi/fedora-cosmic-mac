@@ -2,9 +2,9 @@
     base: "#2C2C2EFF",
     component: (
         base: "#3B3B3DFF",
-        hover: "#4F4F50FF",
+        hover: "#4F4F51FF",
         pressed: "#626264FF",
-        selected: "#4F4F50FF",
+        selected: "#4F4F51FF",
         selected_text: "#63D0DFFF",
         focus: "#63D0DFFF",
         divider: "#FFFFFF33",

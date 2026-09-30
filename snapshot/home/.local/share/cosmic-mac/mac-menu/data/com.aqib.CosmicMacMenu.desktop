@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Mac Menu
+Comment=Logo menu and the focused app's name, like the macOS menu bar
+Type=Application
+Exec=cosmic-mac-menu
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Menu;
+Icon=open-menu-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-OverflowPriority=0

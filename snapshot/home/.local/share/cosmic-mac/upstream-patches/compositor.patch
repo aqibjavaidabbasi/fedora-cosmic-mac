@@ -1,3 +1,19 @@
+diff --git a/src/backend/render/wayland/blur_effect.rs b/src/backend/render/wayland/blur_effect.rs
+index b8a7935..8e00faf 100644
+--- a/src/backend/render/wayland/blur_effect.rs
++++ b/src/backend/render/wayland/blur_effect.rs
+@@ -189,8 +189,10 @@ impl BlurElement {
+         radii: [u8; 4],
+         strength: usize,
+     ) -> Result<Option<Self>, R::Error> {
++        // cosmic-mac: listed apps are blurred behind their window geometry
++        let forced = crate::wayland::handlers::background_effect::mac_forced_blur(states).map(|r| vec![r]);
+         let mut blur_region_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+-        let Some(region) = blur_region_state.current().blur_region.as_ref() else {
++        let Some(region) = blur_region_state.current().blur_region.as_ref().or(forced.as_ref()) else {
+             return Ok(None);
+         };
+ 
 diff --git a/src/input/actions.rs b/src/input/actions.rs
 index 8639ba6..769fb8a 100644
 --- a/src/input/actions.rs
@@ -48,6 +64,22 @@ index 45586b0..8bcc0eb 100644
                                              _ => None, // TODO: Other actions
                                          }
                                      } else {
+diff --git a/src/shell/element/surface.rs b/src/shell/element/surface.rs
+index a7fd922..6479d12 100644
+--- a/src/shell/element/surface.rs
++++ b/src/shell/element/surface.rs
+@@ -111,6 +111,11 @@ fn is_likely_translucent(alpha: f32, data: &SurfaceData) -> bool {
+         return false;
+     }
+ 
++    // cosmic-mac: listed apps are blurred behind (see background_effect.rs)
++    if crate::wayland::handlers::background_effect::mac_forced_blur(data).is_some() {
++        return true;
++    }
++
+     let mut blur_state = data.cached_state.get::<ComputedBlurRegionCachedState>();
+     blur_state
+         .current()
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
 index 47d7885..bc421a6 100644
 --- a/src/shell/mod.rs
@@ -201,6 +233,44 @@ index 47d7885..bc421a6 100644
                  mapped.into()
              } else if !matches!(window_state, WorkspaceRestoreData::Fullscreen(_))
                  && to_workspace.tiling_enabled
+diff --git a/src/wayland/handlers/background_effect.rs b/src/wayland/handlers/background_effect.rs
+index 28682e0..4cb9623 100644
+--- a/src/wayland/handlers/background_effect.rs
++++ b/src/wayland/handlers/background_effect.rs
+@@ -57,3 +57,33 @@ impl ExtBackgroundEffectHandler for State {
+         })
+     }
+ }
++
++/// cosmic-mac: apps whose windows get their background blurred like macOS vibrancy.
++/// One app id per line in ~/.config/cosmic-mac/blur-apps (read at login).
++static MAC_BLUR_APPS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
++    let path = format!("{}/.config/cosmic-mac/blur-apps", std::env::var("HOME").unwrap_or_default());
++    match std::fs::read_to_string(path) {
++        Ok(text) => text
++            .lines()
++            .map(str::trim)
++            .filter(|l| !l.is_empty() && !l.starts_with('#'))
++            .map(str::to_string)
++            .collect(),
++        Err(_) => vec!["org.gnome.Nautilus".to_string()],
++    }
++});
++
++/// The window-geometry rectangle to blur behind, if this toplevel's app is listed.
++pub fn mac_forced_blur(states: &smithay::wayland::compositor::SurfaceData) -> Option<Rectangle<i32, Logical>> {
++    let data = states.data_map.get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()?;
++    let app_id = data.lock().ok()?.app_id.clone()?;
++    if !MAC_BLUR_APPS.iter().any(|a| *a == app_id) {
++        return None;
++    }
++    let geometry = states
++        .cached_state
++        .get::<smithay::wayland::shell::xdg::SurfaceCachedState>()
++        .current()
++        .geometry;
++    geometry.filter(|g| !g.is_empty())
++}
 diff --git a/src/wayland/handlers/workspace.rs b/src/wayland/handlers/workspace.rs
 index fc5c835..e98caca 100644
 --- a/src/wayland/handlers/workspace.rs

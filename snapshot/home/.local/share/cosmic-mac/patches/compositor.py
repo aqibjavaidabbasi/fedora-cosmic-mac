@@ -173,3 +173,73 @@ patch("src/shell/mod.rs", [
                 }
                 mapped.into()"""),
 ])
+
+# ---------------------------------------------------------------------------
+# macOS vibrancy for chosen apps: windows whose app id is listed in
+# ~/.config/cosmic-mac/blur-apps (default: org.gnome.Nautilus) get the wallpaper
+# and windows behind them blurred, as if the app had asked for it with the
+# background-effect protocol (GTK apps can't). Their see-through parts - the
+# Files sidebar, styled by gtk/mac-sidebar-*.css - then look frosted.
+import re, sys
+p = "src/wayland/handlers/background_effect.rs"
+s = open(p).read()
+s += '''
+/// cosmic-mac: apps whose windows get their background blurred like macOS vibrancy.
+/// One app id per line in ~/.config/cosmic-mac/blur-apps (read at login).
+static MAC_BLUR_APPS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+    let path = format!("{}/.config/cosmic-mac/blur-apps", std::env::var("HOME").unwrap_or_default());
+    match std::fs::read_to_string(path) {
+        Ok(text) => text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(str::to_string)
+            .collect(),
+        Err(_) => vec!["org.gnome.Nautilus".to_string()],
+    }
+});
+
+/// The window-geometry rectangle to blur behind, if this toplevel's app is listed.
+pub fn mac_forced_blur(states: &smithay::wayland::compositor::SurfaceData) -> Option<Rectangle<i32, Logical>> {
+    let data = states.data_map.get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()?;
+    let app_id = data.lock().ok()?.app_id.clone()?;
+    if !MAC_BLUR_APPS.iter().any(|a| *a == app_id) {
+        return None;
+    }
+    let geometry = states
+        .cached_state
+        .get::<smithay::wayland::shell::xdg::SurfaceCachedState>()
+        .current()
+        .geometry;
+    geometry.filter(|g| !g.is_empty())
+}
+'''
+open(p, "w").write(s)
+
+p = "src/backend/render/wayland/blur_effect.rs"
+s = open(p).read()
+s, n1 = re.subn(
+    r"        let mut blur_region_state = states\.cached_state\.get::<ComputedBlurRegionCachedState>\(\);\n        let Some\(region\) = blur_region_state\.current\(\)\.blur_region\.as_ref\(\) else \{\n            return Ok\(None\);\n        \};\n",
+    """        // cosmic-mac: listed apps are blurred behind their window geometry
+        let forced = crate::wayland::handlers::background_effect::mac_forced_blur(states).map(|r| vec![r]);
+        let mut blur_region_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+        let Some(region) = blur_region_state.current().blur_region.as_ref().or(forced.as_ref()) else {
+            return Ok(None);
+        };
+""", s, count=1)
+open(p, "w").write(s)
+
+p = "src/shell/element/surface.rs"
+s = open(p).read()
+s, n2 = re.subn(
+    r"(\n    let mut blur_state = data\.cached_state\.get::<ComputedBlurRegionCachedState>\(\);\n    blur_state\n)",
+    r"""
+    // cosmic-mac: listed apps are blurred behind (see background_effect.rs)
+    if crate::wayland::handlers::background_effect::mac_forced_blur(data).is_some() {
+        return true;
+    }
+\1""", s, count=1)
+open(p, "w").write(s)
+if (n1, n2) != (1, 1):
+    print("compositor blur patch failed", n1, n2, file=sys.stderr)
+    sys.exit(1)

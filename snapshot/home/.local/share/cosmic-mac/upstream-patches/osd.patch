@@ -1,0 +1,76 @@
+diff --git a/src/components/app.rs b/src/components/app.rs
+index dd642f4..abc9e5d 100644
+--- a/src/components/app.rs
++++ b/src/components/app.rs
+@@ -1374,6 +1374,29 @@ impl cosmic::Application for App {
+                 HashMap::from_iter(vec![("action", action)])
+             );
+             let countdown = &countdown.to_string();
++            if !matches!(cur_action, OsdTask::ConfirmHeadphones { .. }) {
++                let glyph = match cur_action {
++                    OsdTask::LogOut => "system-log-out-symbolic",
++                    OsdTask::Restart | OsdTask::EnterBios => "system-restart-symbolic",
++                    _ => "system-shutdown-symbolic",
++                };
++                let extra = matches!(cur_action, OsdTask::Shutdown)
++                    .then(|| crate::mac_alert::Action::new(fl!("restart"), Some(Msg::Action(OsdTask::Restart))));
++                let card = crate::mac_alert::alert(
++                    text_icon(glyph, 56).into(),
++                    title.clone(),
++                    fl!("confirm-body", HashMap::from_iter(vec![("action", action), ("countdown", countdown)])),
++                    None,
++                    crate::mac_alert::Action::new(fl!("cancel"), Some(Msg::Cancel)).id(CANCEL_ID.clone()),
++                    crate::mac_alert::Action::new(fl!("confirm", HashMap::from_iter(vec![("action", action)])), Some(Msg::Confirm))
++                        .id(CONFIRM_ID.clone()),
++                    extra,
++                );
++                return Element::from(
++                    autosize::autosize(card, AUTOSIZE_DIALOG_ID.clone())
++                        .limits(Limits::NONE.min_width(1.).min_height(1.).max_width(900.).max_height(900.)),
++                );
++            }
+             let mut dialog = widget::dialog().title(title);
+ 
+             dialog = dialog
+diff --git a/src/components/polkit_dialog.rs b/src/components/polkit_dialog.rs
+index 80f9fc6..7ca7d96 100644
+--- a/src/components/polkit_dialog.rs
++++ b/src/components/polkit_dialog.rs
+@@ -231,14 +231,18 @@ impl State {
+                 .unwrap_or("dialog-authentication"),
+         )
+         .size(64);
++        let _ = (cancel_button, authenticate_button);
++        let can_submit = self.sensitive && self.responder.is_some();
+         widget::autosize::autosize(
+-            widget::dialog::dialog()
+-                .title(&self.msg_authentication_required)
+-                .body(&self.params.message)
+-                .control(widget::column::with_children(right_column).spacing(4))
+-                .icon(icon)
+-                .primary_action(authenticate_button)
+-                .secondary_action(cancel_button),
++            crate::mac_alert::alert(
++                icon.into(),
++                self.msg_authentication_required.clone(),
++                self.params.message.clone(),
++                Some(widget::column::with_children(right_column).spacing(4).into()),
++                crate::mac_alert::Action::new(self.msg_cancel.clone(), self.sensitive.then_some(Msg::Cancel)),
++                crate::mac_alert::Action::new(self.msg_authenticate.clone(), can_submit.then_some(Msg::Authenticate)),
++                None,
++            ),
+             POLKIT_DIALOG_ID.clone(),
+         )
+         .min_width(1.)
+diff --git a/src/main.rs b/src/main.rs
+index 1453ef5..3723644 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -4,6 +4,7 @@ use rust_embed::RustEmbed;
+ use std::sync::LazyLock;
+ 
+ mod components;
++mod mac_alert;
+ mod config;
+ pub mod cosmic_session;
+ pub mod session_manager;

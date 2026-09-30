@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rebuilds the patched COSMIC components (compositor, panel buttons, Notification
-# Center, top bar, overview, Spotlight launcher) for whatever COSMIC version Fedora has installed,
+# Center, top bar, overview, Spotlight launcher, Launchpad, Mac system alerts) for whatever COSMIC version Fedora has installed,
 # plus the helper apps. It never touches your settings.
 # Run by the daily timer and by the launchers when versions differ.
 # Use --force to rebuild everything even if versions already match.
@@ -49,9 +49,11 @@ if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-workspaces 2>/dev/null)" cosmic-workspaces-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-launcher 2>/dev/null)" cosmic-launcher-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-settings 2>/dev/null)" cosmic-settings-built-version \
+   && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-app-library 2>/dev/null)" cosmic-app-library-built-version \
+   && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-osd 2>/dev/null)" cosmic-osd-built-version \
    && [ -x "$HOME/.local/bin/cosmic-mac-control-center" ] && [ -x "$HOME/.local/bin/cosmic-mac-battery" ] \
    && [ -x "$HOME/.local/bin/cosmic-mac-wifi" ] && [ -x "$HOME/.local/bin/cosmic-mac-bluetooth" ] \
-   && [ -x "$HOME/.local/bin/cosmic-mac-stats" ]; then
+   && [ -x "$HOME/.local/bin/cosmic-mac-stats" ] && [ -x "$HOME/.local/bin/cosmic-mac-menu" ]; then
     echo "Already built for COSMIC $VER (applets $AVER, Fedora $REL)."
     exit 0
 fi
@@ -185,6 +187,10 @@ rebuild_extra() {
 rebuild_extra cosmic-panel cosmic-panel panel cosmic-panel-bin cosmic-panel
 rebuild_extra cosmic-workspaces cosmic-workspaces-epoch workspaces "" cosmic-workspaces
 rebuild_extra cosmic-launcher cosmic-launcher launcher "" cosmic-launcher
+# Launchpad (patches/app-library.py)
+rebuild_extra cosmic-app-library cosmic-app-library app-library "" cosmic-app-library
+# macOS-style system alerts: Log Out / Restart / Shut Down, password prompts (patches/osd.py)
+rebuild_extra cosmic-osd cosmic-osd osd "" cosmic-osd
 
 # --- System Settings: macOS sidebar (patches/settings.py) --------------------
 # AVIF wallpaper previews need dav1d's headers (dnf install dav1d-devel); without
@@ -219,6 +225,7 @@ build_app battery cosmic-mac-battery
 build_app wifi cosmic-mac-wifi
 build_app bluetooth cosmic-mac-bluetooth
 build_app stats cosmic-mac-stats
+build_app mac-menu cosmic-mac-menu
 build_app separator cosmic-mac-separator
 
 # Settings are NOT re-applied here, so anything changed in COSMIC Settings survives
