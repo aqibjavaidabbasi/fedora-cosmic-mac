@@ -58,14 +58,14 @@ fn rgb(hex: u32) -> Color {
 /// White glyph on a 24px rounded square, like macOS sidebar icons.
 fn squircle<'a>(glyph: &str, hex: u32) -> Element<'a, Message> {
     let bg = rgb(hex);
-    container(icon::from_name(glyph.to_string()).size(15).symbolic(true))
-        .width(Length::Fixed(24.0))
-        .height(Length::Fixed(24.0))
+    container(icon::from_name(glyph.to_string()).size(17).symbolic(true))
+        .width(Length::Fixed(28.0))
+        .height(Length::Fixed(28.0))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .class(theme::Container::custom(move |_| container::Style {
             background: Some(Background::Color(bg)),
-            border: Border { radius: 6.0.into(), ..Default::default() },
+            border: Border { radius: 7.0.into(), ..Default::default() },
             icon_color: Some(Color::WHITE),
             text_color: Some(Color::WHITE),
             ..Default::default()
@@ -79,7 +79,7 @@ fn row_style(selected: bool, hover: bool) -> theme::Button {
             let c = t.cosmic();
             let on: Color = c.on_bg_color().into();
             let (bg, fg) = if selected {
-                (Some(Background::Color(rgb(0x0A84FF))), Color::WHITE)
+                (Some(Background::Color(Color { a: if c.is_dark { 0.16 } else { 0.10 }, ..on })), on)
             } else if hover || pressed {
                 (Some(Background::Color(Color { a: if pressed { 0.12 } else { 0.07 }, ..on })), on)
             } else {
@@ -142,12 +142,12 @@ pub fn view(app: &SettingsApp) -> Element<'_, Message> {
             let selected = highlight == Some(entity);
             list = list.push(
                 button::custom(
-                    row![squircle(&info.icon_name, *hex), text::body(title)]
-                        .spacing(9)
+                    row![squircle(&info.icon_name, *hex), text::body(title).size(14)]
+                        .spacing(11)
                         .align_y(Alignment::Center),
                 )
                 .width(Length::Fill)
-                .padding([4, 8])
+                .padding([5, 8])
                 .class(row_style(selected, false))
                 .on_press(Message::Page(entity)),
             );
@@ -213,8 +213,10 @@ pub fn window<'a>(app: &'a SettingsApp, content: Element<'a, Message>) -> Elemen
         }));
     let sidebar = container(view(app)).height(Length::Fill).class(theme::Container::custom(|t| {
         let c = t.cosmic();
-        let mut tint: Color = c.background(false).base.into();
-        tint.a = if c.is_dark { 0.55 } else { 0.62 };
+        // Frosted look without relying on compositor blur (COSMIC doesn't blur app
+        // windows yet, and an unblurred see-through sidebar shows text behind it):
+        // a nearly opaque, slightly cool tint that lets only a hint of colour through.
+        let tint = if c.is_dark { Color::from_rgba(0.15, 0.15, 0.16, 0.94) } else { Color::from_rgba(0.925, 0.925, 0.945, 0.94) };
         let on: Color = c.on_bg_color().into();
         container::Style {
             background: Some(Background::Color(tint)),

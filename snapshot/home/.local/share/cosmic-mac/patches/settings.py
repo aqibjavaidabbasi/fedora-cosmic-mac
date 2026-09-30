@@ -60,6 +60,23 @@ sub(r"(        let task = Task::batch\(\[\n)",
         };
 \1            mac_blur,
 """)
+# ask for the blur again once the window exists (the request at startup can be too early)
+sub(r"            Message::SetWindowTitle => return self\.set_title\(\),\n",
+    r"""            Message::SetWindowTitle => {
+                let blur = match self.core.main_window_id() {
+                    Some(id) => cosmic::iced::runtime::task::effect(cosmic::iced::runtime::Action::PlatformSpecific(
+                        cosmic::iced::runtime::platform_specific::Action::Wayland(
+                            cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
+                                id,
+                                Some(vec![cosmic::iced::Rectangle { x: 0., y: 0., width: f32::MAX, height: f32::MAX }]),
+                            ),
+                        ),
+                    )),
+                    None => Task::none(),
+                };
+                return Task::batch([self.set_title(), blur]);
+            }
+""")
 sub(r"(pub enum Message \{\n)", r"\1    MacClose,\n    MacMinimize,\n    MacMaximize,\n    MacDrag,\n")
 sub(r"(    fn update\(&mut self, message: Message\) -> Task<Self::Message> \{\n        match message \{\n)",
     r"""\1            Message::MacClose => return cosmic::iced::Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Close)),
@@ -83,7 +100,7 @@ w = "cosmic-settings/src/widget/mod.rs"
 t = open(w).read()
 t, n1 = re.subn(
     r"(pub fn page_title<Message: 'static>\(page: &page::Info\) -> Element<'_, Message> \{\n    row::with_capacity\(2\)\n        \.push\()text::title3\(page\.title\.as_str\(\)\)\)",
-    r"\1text::title4(page.title.as_str()).font(cosmic::font::bold()))", t, count=1)
+    r"\1text::title2(page.title.as_str()).size(26))", t, count=1)
 t, n2 = re.subn(
     r"    let previous_button = button::icon\(icon::from_name\(\"go-previous-symbolic\"\)\)\n        \.extra_small\(\)\n        \.padding\(0\)\n        \.label\(parent_page\)\n        \.spacing\(4\)\n        \.class\(button::ButtonClass::Link\)\n        \.on_press\(on_press\);\n\n    let sub_page_header = row::with_capacity\(2\)\.push\(text::title3\(sub_page\)\);\n\n    column::with_capacity\(2\)\n        \.push\(previous_button\)\n        \.push\(sub_page_header\)\n        \.spacing\(6\)\n        \.width\(Length::Shrink\)\n        \.into\(\)",
     "    // macOS: a round back button beside the bold page title (cosmic-mac patches/settings.py).\n"
@@ -94,7 +111,7 @@ t, n2 = re.subn(
     "        .on_press(on_press);\n\n"
     "    row::with_capacity(2)\n"
     "        .push(previous_button)\n"
-    "        .push(text::title4(sub_page).font(cosmic::font::bold()))\n"
+    "        .push(text::title2(sub_page).size(26))\n"
     "        .spacing(12)\n"
     "        .align_y(cosmic::iced::Alignment::Center)\n"
     "        .width(Length::Shrink)\n"

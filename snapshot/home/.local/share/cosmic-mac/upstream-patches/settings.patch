@@ -1,5 +1,5 @@
 diff --git a/cosmic-settings/src/app.rs b/cosmic-settings/src/app.rs
-index da1100f..b091d55 100644
+index da1100f..426a229 100644
 --- a/cosmic-settings/src/app.rs
 +++ b/cosmic-settings/src/app.rs
 @@ -52,6 +52,9 @@ use std::str::FromStr;
@@ -91,7 +91,7 @@ index da1100f..b091d55 100644
      }
  
      fn on_app_exit(&mut self) -> Option<Self::Message> {
-@@ -373,6 +387,10 @@ impl cosmic::Application for SettingsApp {
+@@ -373,11 +387,28 @@ impl cosmic::Application for SettingsApp {
      #[allow(clippy::too_many_lines)]
      fn update(&mut self, message: Message) -> Task<Self::Message> {
          match message {
@@ -102,7 +102,26 @@ index da1100f..b091d55 100644
              Message::Page(page) => return self.activate_page(page),
  
              Message::None => (),
-@@ -892,10 +910,10 @@ impl cosmic::Application for SettingsApp {
+ 
+-            Message::SetWindowTitle => return self.set_title(),
++            Message::SetWindowTitle => {
++                let blur = match self.core.main_window_id() {
++                    Some(id) => cosmic::iced::runtime::task::effect(cosmic::iced::runtime::Action::PlatformSpecific(
++                        cosmic::iced::runtime::platform_specific::Action::Wayland(
++                            cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
++                                id,
++                                Some(vec![cosmic::iced::Rectangle { x: 0., y: 0., width: f32::MAX, height: f32::MAX }]),
++                            ),
++                        ),
++                    )),
++                    None => Task::none(),
++                };
++                return Task::batch([self.set_title(), blur]);
++            }
+ 
+             Message::SearchChanged(phrase) => {
+                 return self.search_changed(phrase);
+@@ -892,10 +923,10 @@ impl cosmic::Application for SettingsApp {
          } else if let Some(sub_pages) = self.pages.sub_pages(self.active_page) {
              self.sub_page_view(sub_pages)
          } else {
@@ -117,10 +136,10 @@ index da1100f..b091d55 100644
      #[allow(clippy::too_many_lines)]
 diff --git a/cosmic-settings/src/mac_sidebar.rs b/cosmic-settings/src/mac_sidebar.rs
 new file mode 100644
-index 0000000..3c2d627
+index 0000000..84f500f
 --- /dev/null
 +++ b/cosmic-settings/src/mac_sidebar.rs
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,234 @@
 +//! macOS System Settings sidebar for COSMIC Settings (cosmic-mac patches/settings.py).
 +//!
 +//! The window is drawn like macOS: traffic lights and a see-through, blurred sidebar
@@ -181,14 +200,14 @@ index 0000000..3c2d627
 +/// White glyph on a 24px rounded square, like macOS sidebar icons.
 +fn squircle<'a>(glyph: &str, hex: u32) -> Element<'a, Message> {
 +    let bg = rgb(hex);
-+    container(icon::from_name(glyph.to_string()).size(15).symbolic(true))
-+        .width(Length::Fixed(24.0))
-+        .height(Length::Fixed(24.0))
++    container(icon::from_name(glyph.to_string()).size(17).symbolic(true))
++        .width(Length::Fixed(28.0))
++        .height(Length::Fixed(28.0))
 +        .align_x(Alignment::Center)
 +        .align_y(Alignment::Center)
 +        .class(theme::Container::custom(move |_| container::Style {
 +            background: Some(Background::Color(bg)),
-+            border: Border { radius: 6.0.into(), ..Default::default() },
++            border: Border { radius: 7.0.into(), ..Default::default() },
 +            icon_color: Some(Color::WHITE),
 +            text_color: Some(Color::WHITE),
 +            ..Default::default()
@@ -202,7 +221,7 @@ index 0000000..3c2d627
 +            let c = t.cosmic();
 +            let on: Color = c.on_bg_color().into();
 +            let (bg, fg) = if selected {
-+                (Some(Background::Color(rgb(0x0A84FF))), Color::WHITE)
++                (Some(Background::Color(Color { a: if c.is_dark { 0.16 } else { 0.10 }, ..on })), on)
 +            } else if hover || pressed {
 +                (Some(Background::Color(Color { a: if pressed { 0.12 } else { 0.07 }, ..on })), on)
 +            } else {
@@ -265,12 +284,12 @@ index 0000000..3c2d627
 +            let selected = highlight == Some(entity);
 +            list = list.push(
 +                button::custom(
-+                    row![squircle(&info.icon_name, *hex), text::body(title)]
-+                        .spacing(9)
++                    row![squircle(&info.icon_name, *hex), text::body(title).size(14)]
++                        .spacing(11)
 +                        .align_y(Alignment::Center),
 +                )
 +                .width(Length::Fill)
-+                .padding([4, 8])
++                .padding([5, 8])
 +                .class(row_style(selected, false))
 +                .on_press(Message::Page(entity)),
 +            );
@@ -336,8 +355,10 @@ index 0000000..3c2d627
 +        }));
 +    let sidebar = container(view(app)).height(Length::Fill).class(theme::Container::custom(|t| {
 +        let c = t.cosmic();
-+        let mut tint: Color = c.background(false).base.into();
-+        tint.a = if c.is_dark { 0.55 } else { 0.62 };
++        // Frosted look without relying on compositor blur (COSMIC doesn't blur app
++        // windows yet, and an unblurred see-through sidebar shows text behind it):
++        // a nearly opaque, slightly cool tint that lets only a hint of colour through.
++        let tint = if c.is_dark { Color::from_rgba(0.15, 0.15, 0.16, 0.94) } else { Color::from_rgba(0.925, 0.925, 0.945, 0.94) };
 +        let on: Color = c.on_bg_color().into();
 +        container::Style {
 +            background: Some(Background::Color(tint)),
@@ -436,7 +457,7 @@ index 01b31d0..a618bcc 100644
  pub fn color_button<'a, Message: 'a + Clone>(
      on_press: Option<Message>,
 diff --git a/cosmic-settings/src/widget/mod.rs b/cosmic-settings/src/widget/mod.rs
-index e53b151..4fbc5f4 100644
+index e53b151..5312d04 100644
 --- a/cosmic-settings/src/widget/mod.rs
 +++ b/cosmic-settings/src/widget/mod.rs
 @@ -88,7 +88,7 @@ pub fn search_page_link<Message: 'static>(title: &str) -> button::TextButton<'_,
@@ -444,7 +465,7 @@ index e53b151..4fbc5f4 100644
  pub fn page_title<Message: 'static>(page: &page::Info) -> Element<'_, Message> {
      row::with_capacity(2)
 -        .push(text::title3(page.title.as_str()))
-+        .push(text::title4(page.title.as_str()).font(cosmic::font::bold()))
++        .push(text::title2(page.title.as_str()).size(26))
          .push(horizontal())
          .into()
  }
@@ -471,7 +492,7 @@ index e53b151..4fbc5f4 100644
          .push(previous_button)
 -        .push(sub_page_header)
 -        .spacing(6)
-+        .push(text::title4(sub_page).font(cosmic::font::bold()))
++        .push(text::title2(sub_page).size(26))
 +        .spacing(12)
 +        .align_y(cosmic::iced::Alignment::Center)
          .width(Length::Shrink)

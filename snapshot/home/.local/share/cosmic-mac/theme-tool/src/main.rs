@@ -1,8 +1,9 @@
-//! Rebuilds COSMIC's light and dark themes with frosted glass + Mac-like corners,
+//! Rebuilds COSMIC's light and dark themes with frosted glass, Mac-like corners and
+//! macOS's neutral window colours,
 //! the same way COSMIC Settings does (builder -> build() -> theme).
 
 use cosmic_config::CosmicConfigEntry;
-use cosmic_theme::{BlurStrength, CornerRadii, Theme, ThemeBuilder};
+use cosmic_theme::{BlurStrength, CornerRadii, Theme, ThemeBuilder, palette::Srgba};
 
 fn apply(builder_cfg: cosmic_config::Config, theme_cfg: cosmic_config::Config, label: &str) {
     let mut b = ThemeBuilder::get_entry(&builder_cfg).unwrap_or_else(|(_, b)| b);
@@ -22,6 +23,20 @@ fn apply(builder_cfg: cosmic_config::Config, theme_cfg: cosmic_config::Config, l
         radius_xl: [160.0; 4],
     };
     b.active_hint = 0;
+    // macOS window colours: neutral greys, no blue tint (#F5F5F7 light, #1E1E20 dark).
+    b.neutral_tint = None;
+    b.bg_color = Some(if label == "Dark" {
+        Srgba::new(0.118, 0.118, 0.125, 1.0)
+    } else {
+        Srgba::new(0.961, 0.961, 0.969, 1.0)
+    });
+    // cards: white on light grey, raised grey on dark, like System Settings
+    b.primary_container_bg = Some(if label == "Dark" {
+        Srgba::new(0.173, 0.173, 0.180, 1.0)
+    } else {
+        Srgba::new(1.0, 1.0, 1.0, 1.0)
+    });
+    b.secondary_container_bg = None;
 
     if let Err(e) = b.write_entry(&builder_cfg) {
         eprintln!("{label}: could not save theme builder: {e:?}");
