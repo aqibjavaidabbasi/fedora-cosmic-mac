@@ -2,8 +2,9 @@
 """Patch cosmic-settings toward macOS System Settings (run from its source root).
 Exits 1 if the code no longer matches.
 
-- Sidebar: patches/mac_sidebar.rs replaces COSMIC's nav bar with a flat macOS list
-  (search field on top, colored rounded icons, grouped, blue selection).
+- Window: patches/mac_sidebar.rs draws it like macOS - traffic lights, a see-through
+  blurred sidebar (search on top, colored rounded icons, grouped, blue selection) and
+  an opaque content area; COSMIC's header bar and nav bar are hidden.
 - The search button in the header bar is gone (search lives in the sidebar).
 """
 import os, re, shutil, sys
@@ -27,16 +28,47 @@ sub(r"(\npub struct SettingsApp \{)", r"""
 mod mac_sidebar;
 \1""")
 
-# our sidebar instead of the stock nav bar
+# macOS window: no COSMIC nav bar or header bar; view() draws sidebar + content itself
 sub(r"(    fn nav_model\(&self\) -> Option<&nav_bar::Model> \{\n        Some\(&self\.nav_model\)\n    \}\n)",
     r"""\1
     fn nav_bar(&self) -> Option<Element<'_, cosmic::Action<Self::Message>>> {
-        if !self.core().nav_bar_active() {
-            return None;
-        }
-        Some(mac_sidebar::view(self).map(cosmic::Action::App))
+        None
+    }
+
+    fn style(&self) -> Option<cosmic::iced::theme::Style> {
+        // transparent window: the sidebar is see-through (blurred by the compositor)
+        let t = cosmic::theme::active();
+        let on: cosmic::iced::Color = t.cosmic().on_bg_color().into();
+        Some(cosmic::iced::theme::Style { background_color: cosmic::iced::Color::TRANSPARENT, text_color: on, icon_color: on })
     }
 """)
+sub(r"(        let mut app = SettingsApp \{\n.*?\n        \};\n)",
+    r"""\1        app.core.window.show_headerbar = false;
+        app.core.window.content_container = false;
+""")
+sub(r"(        let task = Task::batch\(\[\n)",
+    r"""        let mac_blur = match app.core.main_window_id() {
+            Some(id) => cosmic::iced::runtime::task::effect(cosmic::iced::runtime::Action::PlatformSpecific(
+                cosmic::iced::runtime::platform_specific::Action::Wayland(
+                    cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
+                        id,
+                        Some(vec![cosmic::iced::Rectangle { x: 0., y: 0., width: f32::MAX, height: f32::MAX }]),
+                    ),
+                ),
+            )),
+            None => Task::none(),
+        };
+\1            mac_blur,
+""")
+sub(r"(pub enum Message \{\n)", r"\1    MacClose,\n    MacMinimize,\n    MacMaximize,\n    MacDrag,\n")
+sub(r"(    fn update\(&mut self, message: Message\) -> Task<Self::Message> \{\n        match message \{\n)",
+    r"""\1            Message::MacClose => return cosmic::iced::Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Close)),
+            Message::MacMinimize => return cosmic::iced::Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Minimize)),
+            Message::MacMaximize => return cosmic::iced::Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Maximize)),
+            Message::MacDrag => return cosmic::iced::Task::done(cosmic::Action::Cosmic(cosmic::app::Action::Drag)),
+""")
+sub(r"            return self\.page_container\(cosmic::widget::space\(\)\);\n        \};\n\n        container\(view\)\.into\(\)\n",
+    "            return mac_sidebar::window(self, self.page_container(cosmic::widget::space()));\n        };\n\n        mac_sidebar::window(self, container(view).into())\n")
 
 # no search button in the header: search is in the sidebar
 sub(r"(    fn header_start\(&self\) -> Vec<Element<'_, Self::Message>> \{\n)        let mut widgets = Vec::new\(\);\n.*?\n        widgets\n    \}\n",

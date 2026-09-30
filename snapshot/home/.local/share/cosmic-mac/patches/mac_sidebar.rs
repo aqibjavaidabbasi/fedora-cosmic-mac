@@ -1,7 +1,8 @@
 //! macOS System Settings sidebar for COSMIC Settings (cosmic-mac patches/settings.py).
 //!
-//! A flat list like macOS: the search field on top, then groups of pages, each with a
-//! colored rounded-square icon; the selected page is a blue pill. Pages not listed here
+//! The window is drawn like macOS: traffic lights and a see-through, blurred sidebar
+//! (vibrancy) with a flat list of pages (search on top, colored rounded icons, blue
+//! selection) beside an opaque content area. COSMIC's header bar is hidden. Pages not listed here
 //! stay reachable through search and their parent pages.
 
 use cosmic::{
@@ -153,26 +154,79 @@ pub fn view(app: &SettingsApp) -> Element<'_, Message> {
         }
     }
 
-    // The sidebar sits on its own slightly lighter rounded panel, like macOS.
-    container(
+    // Traffic lights (close, minimize, zoom) on a draggable strip, like macOS.
+    let light = |hex: u32, msg: Message| {
+        button::custom(cosmic::widget::Space::new().width(Length::Fixed(12.0)).height(Length::Fixed(12.0)))
+            .padding(0)
+            .class(theme::Button::Custom {
+                active: Box::new(move |_, _| traffic(hex, 1.0)),
+                hovered: Box::new(move |_, _| traffic(hex, 0.8)),
+                pressed: Box::new(move |_, _| traffic(hex, 0.6)),
+                disabled: Box::new(move |_| traffic(hex, 1.0)),
+            })
+            .on_press(msg)
+    };
+    let lights = cosmic::widget::mouse_area(
         container(
-            column![search, scrollable(list).height(Length::Fill)]
-                .spacing(12)
-                .padding([10, 10, 10, 10]),
+            row![light(0xFF5F57, Message::MacClose), light(0xFEBC2E, Message::MacMinimize), light(0x28C840, Message::MacMaximize)]
+                .spacing(8),
         )
+        .width(Length::Fill)
+        .padding([14, 16, 10, 16]),
+    )
+    .on_press(Message::MacDrag)
+    .on_double_click(Message::MacMaximize);
+
+    column![lights, container(column![search, scrollable(list).height(Length::Fill)].spacing(12)).padding([0, 10, 10, 10])]
+        .width(Length::Fixed(250.0))
+        .height(Length::Fill)
+        .into()
+}
+
+fn traffic(hex: u32, dim: f32) -> cosmic::widget::button::Style {
+    let c = rgb(hex);
+    cosmic::widget::button::Style {
+        background: Some(Background::Color(Color { r: c.r * dim, g: c.g * dim, b: c.b * dim, a: 1.0 })),
+        border_radius: 6.0.into(),
+        border_width: 0.5,
+        border_color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
+        ..cosmic::widget::button::Style::new()
+    }
+}
+
+/// The whole macOS-style window: a see-through, blurred sidebar (vibrancy) beside an
+/// opaque content area with a draggable toolbar strip on top.
+pub fn window<'a>(app: &'a SettingsApp, content: Element<'a, Message>) -> Element<'a, Message> {
+    let toolbar = cosmic::widget::mouse_area(container(cosmic::widget::Space::new().height(Length::Fixed(10.0))).width(Length::Fill))
+        .on_press(Message::MacDrag)
+        .on_double_click(Message::MacMaximize);
+    let content = container(column![toolbar, content].height(Length::Fill))
+        .width(Length::Fill)
         .height(Length::Fill)
         .class(theme::Container::custom(|t| {
             let c = t.cosmic();
-            let on: Color = c.on_bg_color().into();
             container::Style {
-                background: Some(Background::Color(Color { a: if c.is_dark { 0.06 } else { 0.04 }, ..on })),
-                border: Border { radius: 14.0.into(), width: 1.0, color: Color { a: 0.08, ..on } },
+                background: Some(Background::Color(c.background(false).base.into())),
+                border: Border { radius: [0.0, 12.0, 12.0, 0.0].into(), ..Default::default() },
                 ..Default::default()
             }
-        })),
-    )
-    .padding([0, 0, 8, 8])
-    .width(Length::Fixed(258.0))
-    .height(Length::Fill)
-    .into()
+        }));
+    let sidebar = container(view(app)).height(Length::Fill).class(theme::Container::custom(|t| {
+        let c = t.cosmic();
+        let mut tint: Color = c.background(false).base.into();
+        tint.a = if c.is_dark { 0.55 } else { 0.62 };
+        let on: Color = c.on_bg_color().into();
+        container::Style {
+            background: Some(Background::Color(tint)),
+            border: Border { radius: [12.0, 0.0, 0.0, 12.0].into(), width: 0.0, color: Color { a: 0.0, ..on } },
+            ..Default::default()
+        }
+    }));
+    let divider = container(cosmic::widget::Space::new().width(Length::Fixed(1.0)))
+        .height(Length::Fill)
+        .class(theme::Container::custom(|t| {
+            let on: Color = t.cosmic().on_bg_color().into();
+            container::Style { background: Some(Background::Color(Color { a: 0.08, ..on })), ..Default::default() }
+        }));
+    row![sidebar, divider, content].height(Length::Fill).into()
 }
