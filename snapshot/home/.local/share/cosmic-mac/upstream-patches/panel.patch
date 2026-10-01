@@ -1,8 +1,8 @@
 diff --git a/cosmic-panel-bin/src/space_container/space_container.rs b/cosmic-panel-bin/src/space_container/space_container.rs
-index cdfdd05..75fa3d3 100644
+index cdfdd05..6e500b8 100644
 --- a/cosmic-panel-bin/src/space_container/space_container.rs
 +++ b/cosmic-panel-bin/src/space_container/space_container.rs
-@@ -344,7 +344,7 @@ impl SpaceContainer {
+@@ -344,14 +344,14 @@ impl SpaceContainer {
              || (c.name == entry.name
                  && (c.is_horizontal() != entry.is_horizontal()
                  || c.size != entry.size
@@ -11,6 +11,15 @@ index cdfdd05..75fa3d3 100644
                  || c.plugins_center != entry.plugins_center
                  || c.plugins_wings != entry.plugins_wings))
              // Priority change to conflict with adjacent panel
+-            || c.name != entry.name
++            || c.name != entry.name && c.output == entry.output && c.anchor == entry.anchor
+                 && Some(c.anchor) != opposite_anchor
+                 && (old_priority < c.get_priority() && new_priority > c.get_priority() || old_priority > c.get_priority() && new_priority < c.get_priority())}
+-            || c.name != entry.name && old_priority != new_priority && c.anchor == entry.anchor
++            || c.name != entry.name && c.output == entry.output && old_priority != new_priority && c.anchor == entry.anchor
+             // || self.space_list.iter().any(|s| s.has_layer_overlap())
+ 
+         );
 @@ -642,3 +642,14 @@ impl SpaceContainer {
          }
      }

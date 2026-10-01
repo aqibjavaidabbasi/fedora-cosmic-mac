@@ -972,6 +972,23 @@ impl App {
     /// `--app quit|hide|hide-others <app_id>` from the top bar's app menu.
     fn run_cli(&mut self) {
         let Some((action, app_id)) = self.cli.clone() else { return };
+        if action == "switch" {
+            // `--switch next|prev`: move the first display that has several workspaces
+            let groups: Vec<_> = self.workspace_state.workspace_groups().map(|g| g.workspaces.clone()).collect();
+            for handles in groups {
+                let mut list: Vec<_> = handles.iter().filter_map(|h| self.workspace_state.workspace_info(h).cloned()).collect();
+                list.sort_by(|a, b| a.coordinates.cmp(&b.coordinates));
+                if list.len() < 2 {
+                    continue;
+                }
+                let cur = list.iter().position(|w| w.state.contains(ext_workspace_handle_v1::State::Active)).unwrap_or(0);
+                let next = if app_id == "prev" { (cur + list.len() - 1) % list.len() } else { (cur + 1) % list.len() };
+                self.activate(&list[next].handle);
+                break;
+            }
+            self.cli_done = true;
+            return;
+        }
         let manager = &self.toplevel_manager_state.manager;
         for info in self.toplevel_info_state.toplevels() {
             let Some(cosmic) = info.cosmic_toplevel.as_ref() else { continue };
@@ -979,6 +996,8 @@ impl App {
             match action.as_str() {
                 "quit" if mine => manager.close(cosmic),
                 "hide" if mine => manager.set_minimized(cosmic),
+                "maximize" if mine => manager.set_maximized(cosmic),
+                "unmaximize" if mine => manager.unset_maximized(cosmic),
                 "hide-others" if !mine && !info.state.contains(&TState::Sticky) => manager.set_minimized(cosmic),
                 _ => {}
             }
@@ -1141,6 +1160,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() == 4 && args[1] == "--app" {
         app.cli = Some((args[2].clone(), args[3].clone()));
+    }
+    if args.len() == 3 && args[1] == "--switch" {
+        app.cli = Some(("switch".to_string(), args[2].clone()));
     }
 
     loop {

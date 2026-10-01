@@ -30,4 +30,17 @@ fn panel_bg_family(b: &CosmicPanelBackground) -> u8 {
     }
 }
 """
+# A panel changing priority (the Dock toggling autohide when a window maximizes)
+# only forces a rebuild of panels sharing its screen, not the other screens' Docks
+# or bars.
+s, n = re.subn(
+    r"(\|\| c\.name != entry\.name\n\s+&& Some\(c\.anchor\) != opposite_anchor)",
+    r"|| c.name != entry.name && c.output == entry.output && c.anchor == entry.anchor\n                && Some(c.anchor) != opposite_anchor",
+    s, count=1)
+s, n2 = re.subn(
+    r"\|\| c\.name != entry\.name && old_priority != new_priority && c\.anchor == entry\.anchor",
+    "|| c.name != entry.name && c.output == entry.output && old_priority != new_priority && c.anchor == entry.anchor",
+    s, count=1)
+if (n, n2) != (1, 1):
+    sys.exit(1)
 open(p, "w").write(s)
