@@ -74,6 +74,19 @@ fn dim(t: &cosmic::Theme) -> cosmic::iced::widget::text::Style {
     cosmic::iced::widget::text::Style { color: Some(c), ..Default::default() }
 }
 
+/// Grey close button, like macOS (not the accent color).
+fn close_style(t: &cosmic::Theme, hover: f32) -> button::Style {
+    let on: Color = t.cosmic().on_bg_color().into();
+    let grey = Color { a: 0.55, ..on };
+    button::Style {
+        background: (hover > 0.0).then(|| Background::Color(Color { a: hover, ..on })),
+        border_radius: 999.0.into(),
+        icon_color: Some(grey),
+        text_color: Some(grey),
+        ..button::Style::new()
+    }
+}
+
 /// One banner. `body` is the already-built message text; `size()` of text is set here.
 pub fn card<'a, M: Clone + 'static>(
     icon_el: Option<icon::Icon>,
@@ -94,7 +107,12 @@ pub fn card<'a, M: Clone + 'static>(
     };
     let close = button::custom(icon::from_name("window-close-symbolic").size((14.0 * f).round() as u16).symbolic(true))
         .padding((4.0 * f).round() as u16)
-        .class(theme::Button::Text)
+        .class(theme::Button::Custom {
+            active: Box::new(|_, t| close_style(t, 0.0)),
+            hovered: Box::new(|_, t| close_style(t, 0.10)),
+            pressed: Box::new(|_, t| close_style(t, 0.18)),
+            disabled: Box::new(|t| close_style(t, 0.0)),
+        })
         .on_press(on_close);
     let top = row![
         text::caption(app_name)
