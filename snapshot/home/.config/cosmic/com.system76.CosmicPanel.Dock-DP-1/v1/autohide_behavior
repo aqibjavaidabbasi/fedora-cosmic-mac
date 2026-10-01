@@ -1,6 +1,6 @@
 (
-    wait_time: 1000,
-    transition_time: 200,
+    wait_time: 0,
+    transition_time: 180,
     handle_size: 4,
     unhide_delay: 100,
 )

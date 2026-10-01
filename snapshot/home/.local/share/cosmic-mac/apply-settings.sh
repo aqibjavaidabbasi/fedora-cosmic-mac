@@ -41,8 +41,8 @@ put $C/com.system76.CosmicComp/v1/input_touchpad '(state:Enabled,click_method:So
 D=$C/com.system76.CosmicPanel.Dock/v1
 put $D/autohide OnOverlap
 put $D/autohide_behavior '(
-    wait_time: 1000,
-    transition_time: 200,
+    wait_time: 0,
+    transition_time: 180,
     handle_size: 4,
     unhide_delay: 100,
 )'
