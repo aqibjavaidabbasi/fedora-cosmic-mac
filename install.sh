@@ -84,7 +84,7 @@ fi
 
 step "Enabling automatic rebuilds after COSMIC updates"
 systemctl --user daemon-reload
-systemctl --user enable --now cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path
+systemctl --user enable --now cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path cosmic-mac-buttons.service
 
 "$R/check.sh" || true
 printf '\nDone. Log out, pick COSMIC on the login screen, and log back in.\n'

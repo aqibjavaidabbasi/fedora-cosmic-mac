@@ -42,7 +42,7 @@ echo "Session:"
 p=$(env -i HOME="$HOME" SHELL="$SHELL" USER="$USER" "$SHELL" -lc 'command -v cosmic-comp' 2>/dev/null)
 [ "$p" = "$HOME/.local/bin/cosmic-comp" ] && ok "login session uses the patched launchers" \
     || warn "login session finds cosmic-comp at '$p' -> run $D/apply-settings.sh"
-for u in cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path; do
+for u in cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path cosmic-mac-buttons.service; do
     systemctl --user is-enabled -q "$u" 2>/dev/null && ok "$u enabled" || warn "$u not enabled -> systemctl --user enable --now $u"
 done
 exit $bad

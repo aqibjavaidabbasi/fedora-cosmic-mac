@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep the window buttons on the left, like macOS (COSMIC resets them at login)
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/share/cosmic-mac/window-buttons.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

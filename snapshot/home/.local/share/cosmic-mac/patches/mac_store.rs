@@ -144,7 +144,7 @@ fn traffic(hex: u32, dim: f32) -> button::Style {
     let c = rgb(hex);
     button::Style {
         background: Some(Background::Color(Color { r: c.r * dim, g: c.g * dim, b: c.b * dim, a: 1.0 })),
-        border_radius: 6.0.into(),
+        border_radius: 7.0.into(),
         border_width: 0.5,
         border_color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
         ..button::Style::new()
@@ -200,8 +200,10 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     }
 
     let light = |hex: u32, msg: Message| {
-        button::custom(widget::Space::new().width(Length::Fixed(12.0)).height(Length::Fixed(12.0)))
+        button::custom(widget::Space::new().width(Length::Fixed(14.0)).height(Length::Fixed(14.0)))
             .padding(0)
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(14.0))
             .class(theme::Button::Custom {
                 active: Box::new(move |_, _| traffic(hex, 1.0)),
                 hovered: Box::new(move |_, _| traffic(hex, 0.8)),

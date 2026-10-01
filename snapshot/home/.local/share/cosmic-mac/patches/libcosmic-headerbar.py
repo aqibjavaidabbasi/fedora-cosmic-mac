@@ -38,6 +38,8 @@ CONTROLS = r'''    /// Creates the widget for window controls.
             };
             widget::button::custom(widget::Space::new().width(Length::Fixed(14.0)).height(Length::Fixed(14.0)))
                 .padding(0)
+                .width(Length::Fixed(14.0))
+                .height(Length::Fixed(14.0))
                 .class(theme::Button::Custom {
                     active: Box::new(move |_, _| style(1.0)),
                     hovered: Box::new(move |_, _| style(0.88)),
@@ -70,6 +72,12 @@ impl<'a, Message: Clone + 'static> From<HeaderBar<'a, Message>> for Element<'a, 
 def patch(path):
     s = open(path).read()
     if MARK in s:
+        # upgrade older patched copies: fixed 14x14 button size
+        if "Length::Fixed(14.0))\n                .height(Length::Fixed(14.0))\n                .class" not in s:
+            s = s.replace(
+                "                .padding(0)\n                .class(theme::Button::Custom {",
+                "                .padding(0)\n                .width(Length::Fixed(14.0))\n                .height(Length::Fixed(14.0))\n                .class(theme::Button::Custom {", 1)
+            open(path, "w").write(s)
         return True
     s, n1 = re.subn(r"let start = std::mem::take\(&mut self\.start\);", "let mut start = std::mem::take(&mut self.start);", s, count=1)
     s, n2 = re.subn(

@@ -273,6 +273,8 @@ s, n3 = re.subn(
             };
             cosmic::widget::button::custom(cosmic::widget::Space::new().width(Length::Fixed(14.0)).height(Length::Fixed(14.0)))
                 .padding(0)
+                .width(Length::Fixed(14.0))
+                .height(Length::Fixed(14.0))
                 .class(cosmic::theme::Button::Custom {
                     active: Box::new(move |_, _| style(1.0)),
                     hovered: Box::new(move |_, _| style(0.88)),
