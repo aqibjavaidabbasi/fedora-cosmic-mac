@@ -243,3 +243,91 @@ open(p, "w").write(s)
 if (n1, n2) != (1, 1):
     print("compositor blur patch failed", n1, n2, file=sys.stderr)
     sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# macOS title bars for windows COSMIC decorates itself (server-side decorations:
+# Electron/Chromium, Qt and X11 apps): traffic lights on the left - 14px, a little
+# larger than macOS so they are easy to hit, grey when the window is in the
+# background - and the title centered. Drag to move, double-click to zoom,
+# right-click for the window menu.
+p = "src/shell/element/window.rs"
+s = open(p).read()
+s, n3 = re.subn(
+    r"(impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations \{\n    fn view\(&self, win: &CosmicWindowInternal\) -> cosmic::Element<'_, Message> \{\n).*?\n        header\.into\(\)\n    \}\n\}",
+    r'''\1        use cosmic::iced::{Alignment, Background, Border, Color, Length};
+        let sharp_corners = win.window.is_maximized(false)
+            || (win.is_tiled() && !win.appearance_conf.lock().unwrap().clip_tiled_windows);
+        let focused = win.window.is_activated(false);
+        let light = |hex: u32, msg: Option<Message>| {
+            let base = Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+            let style = move |dim: f32| cosmic::widget::button::Style {
+                background: Some(Background::Color(if focused {
+                    Color { r: base.r * dim, g: base.g * dim, b: base.b * dim, a: 1.0 }
+                } else {
+                    Color::from_rgba(0.5, 0.5, 0.5, 0.35)
+                })),
+                border_radius: 7.0.into(),
+                border_width: 0.5,
+                border_color: Color::from_rgba(0.0, 0.0, 0.0, 0.18),
+                ..cosmic::widget::button::Style::new()
+            };
+            cosmic::widget::button::custom(cosmic::widget::Space::new().width(Length::Fixed(14.0)).height(Length::Fixed(14.0)))
+                .padding(0)
+                .class(cosmic::theme::Button::Custom {
+                    active: Box::new(move |_, _| style(1.0)),
+                    hovered: Box::new(move |_, _| style(0.88)),
+                    pressed: Box::new(move |_, _| style(0.72)),
+                    disabled: Box::new(move |_| style(1.0)),
+                })
+                .on_press_maybe(msg)
+        };
+        let lights = cosmic::widget::row::with_children(vec![
+            light(0xFF5F57, Some(Message::Close)).into(),
+            light(0xFEBC2E, cosmic::config::show_minimize().then_some(Message::Minimize)).into(),
+            light(0x28C840, cosmic::config::show_maximize().then_some(Message::Maximize)).into(),
+        ])
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let title = cosmic::widget::text::heading(win.last_title.lock().unwrap().clone())
+            .size(13)
+            .wrapping(cosmic::iced::widget::text::Wrapping::None);
+        let bar = cosmic::iced::widget::Stack::new()
+            .push(
+                cosmic::widget::container(title)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                    .padding([0, 90]),
+            )
+            .push(cosmic::widget::container(lights).padding([0, 12]).center_y(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let radius = if sharp_corners { 0.0 } else { 10.0 };
+        cosmic::widget::mouse_area(
+            cosmic::widget::container(bar)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .class(cosmic::theme::Container::custom(move |t| {
+                    let c = t.cosmic();
+                    let mut bg: Color = c.background(false).base.into();
+                    if !focused {
+                        bg = Color { r: bg.r * 0.97 + 0.015, g: bg.g * 0.97 + 0.015, b: bg.b * 0.97 + 0.015, a: bg.a };
+                    }
+                    let on: Color = c.on_bg_color().into();
+                    cosmic::iced::widget::container::Style {
+                        background: Some(Background::Color(bg)),
+                        text_color: Some(if focused { on } else { Color { a: 0.5, ..on } }),
+                        border: Border { radius: [radius, radius, 0.0, 0.0].into(), ..Default::default() },
+                        ..Default::default()
+                    }
+                })),
+        )
+        .on_press(Message::DragStart)
+        .on_double_click(Message::Maximize)
+        .on_right_press(Message::Menu)
+        .into()
+    }
+}''', s, count=1, flags=re.S)
+if n3 != 1:
+    print("compositor title bar patch failed", file=sys.stderr)
+    sys.exit(1)
+open(p, "w").write(s)

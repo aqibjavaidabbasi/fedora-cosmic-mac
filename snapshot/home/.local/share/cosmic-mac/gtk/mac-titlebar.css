@@ -1,0 +1,67 @@
+/* macOS traffic lights for GTK 3/4 and libadwaita title bars (written by cosmic-mac).
+   The buttons sit on the left (gtk-decoration-layout / button-layout "close,minimize,maximize:"),
+   are 14px colored circles - a little larger than macOS so they are easy to hit - and show
+   their symbols when the pointer is over them. Grey when the window is in the background. */
+
+windowcontrols { border-spacing: 0; }
+windowcontrols.start { margin-left: 6px; margin-right: 6px; }
+
+windowcontrols > button,
+button.titlebutton {
+  min-width: 14px;
+  min-height: 14px;
+  padding: 0;
+  margin: 0 4px;
+  border-radius: 50%;
+  border: 0.5px solid rgba(0, 0, 0, 0.18);
+  box-shadow: none;
+  background-image: none;
+  outline: none;
+}
+windowcontrols > button > image,
+button.titlebutton > image {
+  background: none;
+  box-shadow: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 1px;
+  -gtk-icon-size: 10px;
+  color: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+}
+windowcontrols:hover > button > image,
+.titlebar:hover button.titlebutton > image,
+headerbar:hover button.titlebutton > image {
+  opacity: 1;
+}
+
+windowcontrols > button.close,     button.titlebutton.close     { background-color: #FF5F57; }
+windowcontrols > button.minimize,  button.titlebutton.minimize  { background-color: #FEBC2E; }
+windowcontrols > button.maximize,  button.titlebutton.maximize  { background-color: #28C840; }
+
+windowcontrols > button:hover,  button.titlebutton:hover  { filter: brightness(0.95); }
+windowcontrols > button:active, button.titlebutton:active { filter: brightness(0.82); }
+
+/* window in the background: grey dots like macOS */
+windowcontrols > button:backdrop:not(:hover),
+button.titlebutton:backdrop:not(:hover) {
+  background-color: rgba(128, 128, 128, 0.35);
+  border-color: rgba(0, 0, 0, 0.10);
+}
+
+/* keep them round: libadwaita gives title buttons a 24px minimum, so set the size
+   again with more specific selectors and centre them vertically */
+windowcontrols > button.close, windowcontrols > button.minimize, windowcontrols > button.maximize,
+button.titlebutton.close, button.titlebutton.minimize, button.titlebutton.maximize {
+  min-width: 14px;
+  min-height: 14px;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+windowcontrols > button.close > image, windowcontrols > button.minimize > image, windowcontrols > button.maximize > image {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+windowcontrols { min-height: 14px; }
+windowcontrols > button { -gtk-icon-size: 10px; }
