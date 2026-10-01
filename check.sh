@@ -23,6 +23,7 @@ cosmic-settings cosmic-settings-built-version cosmic-settings Mac System Setting
 cosmic-app-library cosmic-app-library-built-version cosmic-app-library Launchpad
 cosmic-osd cosmic-osd-built-version cosmic-osd Mac-style system alerts
 cosmic-store cosmic-store-built-version cosmic-store Mac App Store
+cosmic-notifications cosmic-notifications-built-version cosmic-notifications Mac notification banners
 cosmic-term cosmic-term-built-version cosmic-term Terminal: Mac title bar
 cosmic-edit cosmic-edit-built-version cosmic-edit Text Editor: Mac title bar
 cosmic-player cosmic-player-built-version cosmic-player Media Player: Mac title bar
