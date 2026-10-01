@@ -10,8 +10,9 @@
 //!
 //! Top bars (one per display, created from the "Panel" template):
 //! - When a display shows a maximized/fullscreen app, its bar takes that app's
-//!   color (sampled from the top of the window), or the matching Light/Dark
-//!   glass style when the app's color would make the text unreadable.
+//!   color (sampled from the top of the window; darkened or lightened when it would
+//!   clash with the theme's text color). Always a custom color: switching between a
+//!   custom color and the Dark/Light styles would rebuild the bar and reload every applet.
 //! - When a display shows the desktop, its bar is frosted glass tinted with
 //!   the wallpaper's color (panel-contrast.py).
 
@@ -84,7 +85,7 @@ struct PendingNew {
 #[derive(Clone, Debug, PartialEq)]
 enum PanelMode {
     Wallpaper,
-    App(String), // the background value written, e.g. "Dark" or "Color((...))"
+    App(String), // the background value written, always "Color((...))"
 }
 
 struct App {
@@ -147,6 +148,19 @@ fn write_if_changed(path: &str, value: &str) {
         return;
     }
     let _ = fs::write(path, value);
+}
+
+/// Keep a bar color readable under the theme's text color without leaving "custom color" mode.
+fn adjust_for_text(rgb: [f32; 3], lum: f32, dark_mode: bool) -> [f32; 3] {
+    if dark_mode && lum > 0.72 {
+        let k = 0.55 / lum;
+        [rgb[0] * k, rgb[1] * k, rgb[2] * k]
+    } else if !dark_mode && lum < 0.28 {
+        let t = ((0.45 - lum) / (1.0 - lum)).clamp(0.0, 1.0);
+        [rgb[0] + (1.0 - rgb[0]) * t, rgb[1] + (1.0 - rgb[1]) * t, rgb[2] + (1.0 - rgb[2]) * t]
+    } else {
+        rgb
+    }
 }
 
 fn system_is_dark() -> bool {
@@ -706,13 +720,12 @@ impl App {
         // A custom color keeps the system theme's text color (light text in
         // dark mode), so use the app's exact color unless it clearly clashes.
         let dark_mode = system_is_dark();
-        let value = if dark_mode && lum > 0.72 {
-            "Light".to_string()
-        } else if !dark_mode && lum < 0.28 {
-            "Dark".to_string()
-        } else {
-            format!("Color(({:.3}, {:.3}, {:.3}))", rgb[0], rgb[1], rgb[2])
-        };
+        // Always a custom color: switching between a custom color and the Dark/Light
+        // styles makes cosmic-panel rebuild the whole bar (every applet reloads, which
+        // flashes the bar on each workspace change). So a color that would clash with the
+        // theme's text is darkened (dark theme) or lightened (light theme) instead.
+        let rgb = adjust_for_text(rgb, lum, dark_mode);
+        let value = format!("Color(({:.3}, {:.3}, {:.3}))", rgb[0], rgb[1], rgb[2]);
         if self.panel_modes.get(name) == Some(&PanelMode::App(value.clone())) {
             return;
         }

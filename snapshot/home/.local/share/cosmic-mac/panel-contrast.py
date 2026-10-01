@@ -4,7 +4,7 @@
 For a display showing the desktop, its top bar is tinted with the color of the
 wallpaper strip behind it (frosted, mostly see-through). If that color would
 make the bar's text unreadable in the current light/dark theme, it uses the
-matching Light or Dark glass instead.
+matching custom color glass instead (never the Dark/Light styles: those rebuild the bar).
 
   panel-contrast.py --output eDP-1 --panel Panel-eDP-1   update one bar
   panel-contrast.py                                      update every bar that is
@@ -129,12 +129,16 @@ def apply(output, panel):
     # The bar's text color comes from the system theme (light text in dark
     # mode, dark text in light mode). Keep the real wallpaper tint unless it
     # would clearly clash with that text color.
+    # Always a custom color (never the Dark/Light styles): switching between those and a
+    # custom color makes cosmic-panel rebuild the bar, flashing every applet. A color that
+    # would clash with the text is darkened (dark theme) or lightened (light theme) instead.
     if system_is_dark() and lum > 0.72:
-        value = "Light"
+        k = 0.55 / lum
+        rgb = tuple(c * k for c in rgb)
     elif not system_is_dark() and lum < 0.28:
-        value = "Dark"
-    else:
-        value = "Color(({:.3}, {:.3}, {:.3}))".format(*rgb)
+        t = max(0.0, min(1.0, (0.45 - lum) / (1.0 - lum)))
+        rgb = tuple(c + (1.0 - c) * t for c in rgb)
+    value = "Color(({:.3}, {:.3}, {:.3}))".format(*rgb)
     d = f"{C}/com.system76.CosmicPanel.{panel}/v1"
     write_if_changed(f"{d}/background", value)
     write_if_changed(f"{d}/opacity", WALLPAPER_OPACITY)
