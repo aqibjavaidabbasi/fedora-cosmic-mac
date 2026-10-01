@@ -209,4 +209,16 @@ sub(r"(        self\.core\n            \.applet\n            \.autosize_window\(
             .on_exit(Message::MacHover(None));
 \1""")
 
+# --- the favorites/running divider is a short line on the shelf, not a full-height rule
+sub(r"                container\(vertical_rule\(1\)\)\n                    \.height\(Length::Fill\)\n                    \.padding\(\[divider_padding, 0\]\)\n                    \.into\(\),",
+    r"""                {
+                    let shelf_h = mac_shelf_height(app_icon.icon_size);
+                    let line = container(vertical_rule(1)).height(Length::Fixed((shelf_h * 0.6).round()));
+                    Column::new()
+                        .push(vertical_space().height(Length::Fill))
+                        .push(container(line).height(Length::Fixed(shelf_h)).align_y(Alignment::Center).padding([0, divider_padding]))
+                        .height(Length::Fill)
+                        .into()
+                },""")
+
 open(p, "w").write(s)

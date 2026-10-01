@@ -1,5 +1,5 @@
 diff --git a/cosmic-app-list/src/app.rs b/cosmic-app-list/src/app.rs
-index 8db96ee..73d5946 100755
+index 8db96ee..eacdb6a 100755
 --- a/cosmic-app-list/src/app.rs
 +++ b/cosmic-app-list/src/app.rs
 @@ -83,10 +83,62 @@ struct AppletIconData {
@@ -200,7 +200,27 @@ index 8db96ee..73d5946 100755
          let divider_padding = match self.core.applet.size {
              Size::Hardcoded(_) => 4,
              Size::PanelSize(ref s) => {
-@@ -2074,6 +2206,25 @@ impl cosmic::Application for CosmicAppList {
+@@ -1999,10 +2131,15 @@ impl cosmic::Application for CosmicAppList {
+                 )
+                 .drag_id(DND_FAVORITES),
+                 row(active).spacing(app_icon.icon_spacing).into(),
+-                container(vertical_rule(1))
+-                    .height(Length::Fill)
+-                    .padding([divider_padding, 0])
+-                    .into(),
++                {
++                    let shelf_h = mac_shelf_height(app_icon.icon_size);
++                    let line = container(vertical_rule(1)).height(Length::Fixed((shelf_h * 0.6).round()));
++                    Column::new()
++                        .push(vertical_space().height(Length::Fill))
++                        .push(container(line).height(Length::Fixed(shelf_h)).align_y(Alignment::Center).padding([0, divider_padding]))
++                        .height(Length::Fill)
++                        .into()
++                },
+             )
+         } else {
+             (
+@@ -2074,6 +2211,25 @@ impl cosmic::Application for CosmicAppList {
              }
          }
  
