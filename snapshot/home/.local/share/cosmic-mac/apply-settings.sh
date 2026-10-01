@@ -252,6 +252,10 @@ for d in gtk-3.0 gtk-4.0; do
     grep -q gtk-decoration-layout "$f" || echo "gtk-decoration-layout=close,minimize,maximize:" >> "$f"
 done
 
+# Clippy (Flatpak) can only show its top-bar icon if it may own its StatusNotifier name
+flatpak list --app --columns=application 2>/dev/null | grep -qx io.github._0_don.clippy \
+    && flatpak override --user --own-name='org.kde.*' io.github._0_don.clippy
+
 # --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
 "$HOME/.local/share/cosmic-mac/gtk-css.sh"
 
