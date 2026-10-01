@@ -120,15 +120,12 @@ def write_if_changed(path, value):
         f.write(value)
 
 
-def apply(output, panel):
+def target(output):
+    """(r, g, b, opacity) for a display's bar over the desktop, or None."""
     rgb = wallpaper_color(output)
     if rgb is None:
-        print(f"{panel}: could not read the wallpaper for {output}; leaving it as is.")
-        return
+        return None
     lum = luminance(rgb)
-    # The bar's text color comes from the system theme (light text in dark
-    # mode, dark text in light mode). Keep the real wallpaper tint unless it
-    # would clearly clash with that text color.
     # Always a custom color (never the Dark/Light styles): switching between those and a
     # custom color makes cosmic-panel rebuild the bar, flashing every applet. A color that
     # would clash with the text is darkened (dark theme) or lightened (light theme) instead.
@@ -138,18 +135,33 @@ def apply(output, panel):
     elif not system_is_dark() and lum < 0.28:
         t = max(0.0, min(1.0, (0.45 - lum) / (1.0 - lum)))
         rgb = tuple(c + (1.0 - c) * t for c in rgb)
-    value = "Color(({:.3}, {:.3}, {:.3}))".format(*rgb)
+    return (*rgb, float(WALLPAPER_OPACITY))
+
+
+def apply(output, panel):
+    t = target(output)
+    if t is None:
+        print(f"{panel}: could not read the wallpaper for {output}; leaving it as is.")
+        return
+    value = "Color(({:.3}, {:.3}, {:.3}))".format(*t[:3])
     d = f"{C}/com.system76.CosmicPanel.{panel}/v1"
     write_if_changed(f"{d}/background", value)
     write_if_changed(f"{d}/opacity", WALLPAPER_OPACITY)
-    print(f"{panel} ({output}): wallpaper color {tuple(round(c, 2) for c in rgb)} -> {value}")
+    print(f"{panel} ({output}): wallpaper color {tuple(round(c, 2) for c in t[:3])} -> {value}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--output")
     ap.add_argument("--panel")
+    ap.add_argument("--print", action="store_true", help="print 'r g b opacity' instead of writing")
     args = ap.parse_args()
+    if args.print and args.output:
+        t = target(args.output)
+        if t is None:
+            return 1
+        print("{:.4f} {:.4f} {:.4f} {:.3f}".format(*t))
+        return 0
     if args.output and args.panel:
         apply(args.output, args.panel)
         return 0

@@ -19,7 +19,9 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    time::Instant,
+    sync::Mutex,
+    thread,
+    time::{Duration, Instant},
 };
 
 use cosmic_client_toolkit::{
@@ -111,6 +113,8 @@ struct App {
     capture: Option<(CaptureSession, Toplevel, String)>,
     /// Per display: last sampled window + title, to avoid re-sampling constantly.
     last_capture: HashMap<String, (Toplevel, String, Instant)>,
+    /// Last sampled color per window, so a workspace switch can fade to it at once.
+    color_cache: HashMap<Toplevel, [f32; 3]>,
     /// Per display: what its top bar currently shows.
     panel_modes: HashMap<String, PanelMode>,
     /// Last focused app written for the top bar's app menu ("app_id\ntitle").
@@ -132,6 +136,110 @@ fn home() -> String {
 
 fn cosmic_dir(id: &str) -> String {
     format!("{}/.config/cosmic/{id}/v1", home())
+}
+
+// ---------------------------------------------------------------------------
+// Smooth bar color changes
+// ---------------------------------------------------------------------------
+// The bar color follows the app on each workspace. Instead of snapping to the new
+// color, it fades there over ~0.3s (ease in-out), so a workspace switch is not
+// noticed as a color jump. A newer change cancels an older fade on the same bar.
+
+/// Where a bar should end up.
+#[derive(Clone)]
+enum Goal {
+    /// A specific color and opacity (an app's color).
+    Color([f32; 3], f32),
+    /// The wallpaper-tinted glass for this display (asked from panel-contrast.py).
+    Wallpaper,
+}
+
+static FADE_GEN: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+static WALLPAPER_GOAL: Mutex<Option<HashMap<String, ([f32; 3], f32, Instant)>>> = Mutex::new(None);
+
+fn fade_generation(name: &str, bump: bool) -> u64 {
+    let mut g = FADE_GEN.lock().unwrap();
+    let map = g.get_or_insert_with(HashMap::new);
+    let e = map.entry(name.to_string()).or_insert(0);
+    if bump {
+        *e += 1;
+    }
+    *e
+}
+
+fn read_bar(entry: &str) -> Option<([f32; 3], f32)> {
+    let bg = fs::read_to_string(panel_file(entry, "background")).ok()?;
+    let nums: Vec<f32> = bg
+        .trim()
+        .strip_prefix("Color((")?
+        .trim_end_matches("))")
+        .split(',')
+        .filter_map(|v| v.trim().parse().ok())
+        .collect();
+    let op: f32 = fs::read_to_string(panel_file(entry, "opacity")).ok()?.trim().parse().ok()?;
+    (nums.len() == 3).then(|| ([nums[0], nums[1], nums[2]], op))
+}
+
+fn write_bar(entry: &str, rgb: [f32; 3], op: f32) {
+    write_if_changed(&panel_file(entry, "opacity"), &format!("{op:.3}"));
+    write_if_changed(&panel_file(entry, "background"), &format!("Color(({:.3}, {:.3}, {:.3}))", rgb[0], rgb[1], rgb[2]));
+}
+
+fn wallpaper_goal(name: &str) -> Option<([f32; 3], f32)> {
+    {
+        let g = WALLPAPER_GOAL.lock().unwrap();
+        if let Some((rgb, op, when)) = g.as_ref().and_then(|m| m.get(name)) {
+            if when.elapsed().as_secs() < 90 {
+                return Some((*rgb, *op));
+            }
+        }
+    }
+    let out = std::process::Command::new(format!("{}/.local/share/cosmic-mac/panel-contrast.py", home()))
+        .args(["--output", name, "--print"])
+        .output()
+        .ok()?;
+    let v: Vec<f32> = String::from_utf8_lossy(&out.stdout).split_whitespace().filter_map(|x| x.parse().ok()).collect();
+    if v.len() != 4 {
+        return None;
+    }
+    let goal = ([v[0], v[1], v[2]], v[3]);
+    WALLPAPER_GOAL.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.to_string(), (goal.0, goal.1, Instant::now()));
+    Some(goal)
+}
+
+/// Fade the named display's bar to `goal` in the background (never blocks the event loop).
+fn fade_bar(name: &str, goal: Goal) {
+    let gen_now = fade_generation(name, true);
+    let name = name.to_string();
+    thread::spawn(move || {
+        let entry = panel_entry(&name);
+        let (to, to_op) = match goal {
+            Goal::Color(rgb, op) => (rgb, op),
+            Goal::Wallpaper => match wallpaper_goal(&name) {
+                Some(g) => g,
+                None => return,
+            },
+        };
+        if fade_generation(&name, false) != gen_now {
+            return;
+        }
+        let Some((from, from_op)) = read_bar(&entry) else {
+            write_bar(&entry, to, to_op); // not a custom color yet: nothing to fade from
+            return;
+        };
+        let steps = 14;
+        for i in 1..=steps {
+            if fade_generation(&name, false) != gen_now {
+                return; // a newer change took over
+            }
+            let t = i as f32 / steps as f32;
+            let e = t * t * (3.0 - 2.0 * t); // smoothstep
+            let mix = |a: f32, b: f32| a + (b - a) * e;
+            write_bar(&entry, [mix(from[0], to[0]), mix(from[1], to[1]), mix(from[2], to[2])], mix(from_op, to_op));
+            thread::sleep(Duration::from_millis(22));
+        }
+        write_bar(&entry, to, to_op);
+    });
 }
 
 /// Top bar entry name for a display, e.g. "Panel-eDP-1".
@@ -646,6 +754,10 @@ impl App {
             );
             match big {
                 Some(info) => {
+                    // fade to the last known color of this window right away
+                    if let Some(rgb) = self.color_cache.get(&info.foreign_toplevel).copied() {
+                        self.set_app_color(&name, rgb);
+                    }
                     if let Some((t, title, when)) = self.last_capture.get(&name) {
                         if *t == info.foreign_toplevel
                             && *title == info.title
@@ -707,11 +819,7 @@ impl App {
             return;
         }
         log!("{name}: top bar -> wallpaper glass");
-        let _ = std::process::Command::new(format!("{}/.local/share/cosmic-mac/panel-contrast.py", home()))
-            .args(["--output", name, "--panel", &panel_entry(name)])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        fade_bar(name, Goal::Wallpaper);
         self.panel_modes.insert(name.to_string(), PanelMode::Wallpaper);
     }
 
@@ -731,8 +839,8 @@ impl App {
         }
         log!("{name}: top bar -> app color {rgb:?} => {value}");
         let entry = panel_entry(name);
-        write_if_changed(&panel_file(&entry, "opacity"), "0.85");
-        write_if_changed(&panel_file(&entry, "background"), &value);
+        let _ = &entry;
+        fade_bar(name, Goal::Color(rgb, 0.85));
         self.panel_modes.insert(name.to_string(), PanelMode::App(value));
     }
 }
@@ -816,9 +924,13 @@ impl ScreencopyHandler for App {
             }
             (n > 0.0).then(|| [(sum[0] / n / 255.0) as f32, (sum[1] / n / 255.0) as f32, (sum[2] / n / 255.0) as f32])
         };
+        let sampled = self.capture.as_ref().map(|c| c.1.clone());
         self.capture = None;
         self.release_capture_pool();
         if let Some(rgb) = rgb {
+            if let Some(t) = sampled {
+                self.color_cache.insert(t, rgb);
+            }
             self.set_app_color(&output, rgb);
         }
         // Other displays may be waiting, or focus changed while capturing.
@@ -902,6 +1014,7 @@ impl ToplevelInfoHandler for App {
         if self.cli.is_some() {
             return;
         }
+        self.color_cache.remove(toplevel);
         let tracked = self.tracked.remove(toplevel);
         if let Some(info) = self.toplevel_info_state.info(toplevel).cloned() {
             // Closing a full-screen app returns to that display's desktop, like macOS.
@@ -1019,6 +1132,7 @@ fn main() {
         capture_pool: None,
         capture: None,
         last_capture: HashMap::new(),
+        color_cache: HashMap::new(),
         panel_modes: HashMap::new(),
         focused: String::new(),
         cli: None,
