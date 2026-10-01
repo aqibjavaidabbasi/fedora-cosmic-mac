@@ -44,3 +44,23 @@ s, n2 = re.subn(
 if (n, n2) != (1, 1):
     sys.exit(1)
 open(p, "w").write(s)
+
+# Turning autohide on in place (the Dock hiding for a maximized app) must also give
+# back the screen space the panel reserved while it was visible; before, the panel
+# was rebuilt and so started without it.
+p2 = "cosmic-panel-bin/src/space/panel_space.rs"
+t = open(p2).read()
+t, n = re.subn(
+    r"(        // try to force rearrangement\n)",
+    """        if config.autohide_enabled() && !self.config.autohide_enabled() && !config.exclusive_zone {
+            if let Some(l) = self.layer.as_ref() {
+                l.set_exclusive_zone(-1);
+                needs_commit = true;
+            }
+        }
+
+\\1""",
+    t, count=1)
+if n != 1:
+    sys.exit(1)
+open(p2, "w").write(t)

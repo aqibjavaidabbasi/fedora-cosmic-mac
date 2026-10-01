@@ -1,3 +1,21 @@
+diff --git a/cosmic-panel-bin/src/space/panel_space.rs b/cosmic-panel-bin/src/space/panel_space.rs
+index 4ae16ca..3f18a5b 100644
+--- a/cosmic-panel-bin/src/space/panel_space.rs
++++ b/cosmic-panel-bin/src/space/panel_space.rs
+@@ -1760,6 +1760,13 @@ impl PanelSpace {
+             needs_commit = true;
+         }
+ 
++        if config.autohide_enabled() && !self.config.autohide_enabled() && !config.exclusive_zone {
++            if let Some(l) = self.layer.as_ref() {
++                l.set_exclusive_zone(-1);
++                needs_commit = true;
++            }
++        }
++
+         // try to force rearrangement
+         if config.autohide_enabled() && !self.config.autohide_enabled()
+             || !config.autohide_enabled() && self.config.autohide_enabled()
 diff --git a/cosmic-panel-bin/src/space_container/space_container.rs b/cosmic-panel-bin/src/space_container/space_container.rs
 index cdfdd05..6e500b8 100644
 --- a/cosmic-panel-bin/src/space_container/space_container.rs
