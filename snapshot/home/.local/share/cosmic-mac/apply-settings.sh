@@ -76,11 +76,12 @@ put $P/opacity 0.2
 put $P/size S          # 20px icons, like the macOS menu bar
 put $P/spacing 0
 put $P/plugins_center 'Some([])'
-# macOS order: logo menu + app name on the left; extras, Bluetooth, battery,
+# macOS order: logo menu + app name on the left; app tray icons, extras, Bluetooth, battery,
 # Wi-Fi, Spotlight, Control Center and the clock on the right.
 put $P/plugins_wings 'Some(([
     "com.aqib.CosmicMacMenu",
 ], [
+    "com.system76.CosmicAppletStatusArea",
     "com.aqib.CosmicMacStats",
     "com.github.codevardhan.caffeine-applet",
     "com.aqib.CosmicMacBluetooth",

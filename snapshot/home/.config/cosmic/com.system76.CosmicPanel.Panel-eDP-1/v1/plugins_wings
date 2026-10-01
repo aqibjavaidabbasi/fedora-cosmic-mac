@@ -1,6 +1,7 @@
 Some(([
     "com.aqib.CosmicMacMenu",
 ], [
+    "com.system76.CosmicAppletStatusArea",
     "com.aqib.CosmicMacStats",
     "com.github.codevardhan.caffeine-applet",
     "com.aqib.CosmicMacBluetooth",
