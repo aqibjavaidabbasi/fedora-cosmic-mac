@@ -181,7 +181,7 @@ impl cosmic::Application for MacMenu {
                         s
                     },
                     None,
-                )).chain(style::blur(new_id));
+                )).chain(style::blur(new_id)).chain(style::blur_soon(new_id, 150)).chain(style::blur_soon(new_id, 700));
                 return close.chain(open);
             }
             Message::CloseRequested(id) => {

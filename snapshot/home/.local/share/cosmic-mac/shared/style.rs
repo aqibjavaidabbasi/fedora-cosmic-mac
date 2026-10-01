@@ -71,6 +71,19 @@ pub fn glass(t: &Theme) -> Color {
     }
 }
 
+/// Glossy glass for popovers: the Settings-sidebar tint, a little more see-through so the
+/// blur behind shows, lighter along the top edge like a lit sheet of glass.
+pub fn gloss(t: &Theme) -> Background {
+    let (top, bottom) = if t.cosmic().is_dark {
+        (Color::from_rgba(0.24, 0.24, 0.27, 0.80), Color::from_rgba(0.13, 0.13, 0.15, 0.86))
+    } else {
+        (Color::from_rgba(0.99, 0.99, 1.0, 0.80), Color::from_rgba(0.90, 0.90, 0.93, 0.88))
+    };
+    Background::Gradient(cosmic::iced::Gradient::Linear(
+        cosmic::iced::gradient::Linear::new(cosmic::iced::Radians(std::f32::consts::PI)).add_stop(0.0, top).add_stop(1.0, bottom),
+    ))
+}
+
 /// Ask the compositor to blur what is behind a popover (chain it after opening the popup).
 pub fn blur<M: Send + 'static>(id: cosmic::iced::window::Id) -> cosmic::iced::Task<M> {
     cosmic::iced::runtime::task::effect(cosmic::iced::runtime::Action::PlatformSpecific(
@@ -83,6 +96,15 @@ pub fn blur<M: Send + 'static>(id: cosmic::iced::window::Id) -> cosmic::iced::Ta
     ))
 }
 
+/// Ask for the blur again a moment later: the first request can arrive before the popup exists.
+pub fn blur_soon<M: Send + 'static>(id: cosmic::iced::window::Id, ms: u64) -> cosmic::iced::Task<M> {
+    cosmic::iced::Task::future(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        id
+    })
+    .then(|id| blur::<M>(id))
+}
+
 /// The macOS menu-bar popover sheet: fixed width, rounded, frosted like the Settings sidebar.
 pub fn popover<'a, M: 'static>(content: impl Into<Element<'a, M>>, width: f32) -> Element<'a, M> {
     let sheet = container(content).width(Length::Fill).class(theme::Container::custom(|t| {
@@ -90,7 +112,7 @@ pub fn popover<'a, M: 'static>(content: impl Into<Element<'a, M>>, width: f32) -
         iced_container::Style {
             text_color: Some(bg.on.into()),
             icon_color: Some(bg.on.into()),
-            background: Some(Background::Color(glass(t))),
+            background: Some(gloss(t)),
             border: Border { radius: POPOVER_RADIUS.into(), width: 1.0, color: hairline(t) },
             shadow: Shadow::default(),
             snap: true,

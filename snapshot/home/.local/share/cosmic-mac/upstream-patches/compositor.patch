@@ -81,10 +81,10 @@ index a7fd922..6479d12 100644
      blur_state
          .current()
 diff --git a/src/shell/element/window.rs b/src/shell/element/window.rs
-index fa4a187..bfcf467 100644
+index fa4a187..7d33adc 100644
 --- a/src/shell/element/window.rs
 +++ b/src/shell/element/window.rs
-@@ -867,27 +867,77 @@ pub struct DefaultDecorations;
+@@ -867,27 +867,79 @@ pub struct DefaultDecorations;
  
  impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
      fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
@@ -126,6 +126,8 @@ index fa4a187..bfcf467 100644
 +            };
 +            cosmic::widget::button::custom(cosmic::widget::Space::new().width(Length::Fixed(14.0)).height(Length::Fixed(14.0)))
 +                .padding(0)
++                .width(Length::Fixed(14.0))
++                .height(Length::Fixed(14.0))
 +                .class(cosmic::theme::Button::Custom {
 +                    active: Box::new(move |_, _| style(1.0)),
 +                    hovered: Box::new(move |_, _| style(0.88)),

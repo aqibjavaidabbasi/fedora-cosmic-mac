@@ -119,7 +119,7 @@ impl cosmic::Application for Wifi {
                         app.core.applet.get_popup_settings(app.core.main_window_id().unwrap(), new_id, Some((1, 1)), None, None)
                     },
                     None,
-                )).chain(style::blur(new_id));
+                )).chain(style::blur(new_id)).chain(style::blur_soon(new_id, 150)).chain(style::blur_soon(new_id, 700));
                 return Task::batch([open, self.refresh(true)]);
             }
             Message::CloseRequested(id) => {

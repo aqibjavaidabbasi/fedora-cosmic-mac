@@ -32,6 +32,8 @@ use cosmic::{
     Element, Task, app,
     iced::{Alignment, Background, Border, Color, Length, Subscription, core::widget::text::Wrapping, time, window},
     iced::widget::slider as iced_slider,
+    iced::widget::{Stack, mouse_area},
+    iced::{Padding, Point},
     theme::{self, Button},
     widget::{Column, Row, button, container, icon, image, row, slider, space, text},
 };
@@ -43,6 +45,135 @@ const PAD: f32 = 12.0;
 const TILE_H: f32 = 56.0;
 const COL_W: f32 = (WIDTH - 2.0 * PAD - GAP) / 2.0;
 const CIRCLE: f32 = TILE_H;
+
+// ---- tile grid: 4 slots across; a tile is `w` slots wide and `h` units high ----
+const GRID_W: f32 = WIDTH - 2.0 * PAD;
+const SW: f32 = (GRID_W - 3.0 * GAP) / 4.0; // one slot
+const V: f32 = 22.0; // one vertical unit (a tile is h*V - GAP high, so a 3-unit pill is TILE_H)
+
+#[derive(Clone, Debug)]
+struct TileCfg {
+    id: String,
+    wide: bool,
+}
+
+struct Drag {
+    id: String,
+    grab: Point,
+    last_target: Option<String>,
+}
+
+const DEFAULT_TILES: [&str; 16] = [
+    "wifi", "media", "bluetooth", "airplane", "overview", "displays", "appearance", "screenshot", "focus", "touch",
+    "display", "sound", "rec-sel", "capture", "rec-screen", "record",
+];
+
+/// (title, slots wide, units high, can be widened)
+fn tile_info(id: &str) -> (&'static str, usize, usize, bool) {
+    match id {
+        "wifi" => ("Wi-Fi", 2, 3, true),
+        "bluetooth" => ("Bluetooth", 2, 3, true),
+        "media" => ("Now Playing", 2, 6, true),
+        "airplane" => ("Airplane Mode", 2, 3, true),
+        "overview" => ("Mission Control", 1, 3, true),
+        "displays" => ("Displays", 1, 3, true),
+        "appearance" => ("Appearance", 1, 3, true),
+        "screenshot" => ("Screenshot", 1, 3, true),
+        "focus" => ("Focus", 2, 3, true),
+        "touch" => ("Touch", 2, 3, true),
+        "display" => ("Display", 4, 4, false),
+        "sound" => ("Sound", 4, 4, false),
+        "rec-sel" => ("Record Selection", 2, 3, true),
+        "capture" => ("Capture", 2, 3, true),
+        "rec-screen" => ("Record Screen", 2, 3, true),
+        "record" => ("Record", 2, 3, true),
+        _ => ("", 2, 3, false),
+    }
+}
+
+fn layout_conf() -> String {
+    format!("{}/.config/cosmic-mac/control-center.conf", std::env::var("HOME").unwrap_or_default())
+}
+
+/// `layout=wifi,media*,...` - order of the tiles; a trailing `*` marks a widened tile.
+fn load_layout() -> Vec<TileCfg> {
+    let text = std::fs::read_to_string(layout_conf()).unwrap_or_default();
+    let mut out: Vec<TileCfg> = Vec::new();
+    if let Some(list) = text.lines().find_map(|l| l.trim().strip_prefix("layout=")) {
+        for item in list.split(',') {
+            let item = item.trim();
+            let (id, wide) = match item.strip_suffix('*') {
+                Some(id) => (id, true),
+                None => (item, false),
+            };
+            if DEFAULT_TILES.contains(&id) && !out.iter().any(|t| t.id == id) {
+                out.push(TileCfg { id: id.to_string(), wide });
+            }
+        }
+    }
+    for id in DEFAULT_TILES {
+        if !out.iter().any(|t| t.id == id) {
+            out.push(TileCfg { id: id.to_string(), wide: false });
+        }
+    }
+    out
+}
+
+fn save_layout(tiles: &[TileCfg]) {
+    let list: Vec<String> = tiles.iter().map(|t| format!("{}{}", t.id, if t.wide { "*" } else { "" })).collect();
+    let path = layout_conf();
+    let _ = std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap());
+    let _ = std::fs::write(path, format!("# Control Center tile order; * = wide tile (Edit Controls > Arrange Tiles)
+layout={}
+", list.join(",")));
+}
+
+/// Packing of (w, h) tiles into 4 slots, in order: each tile goes to the first free spot that
+/// is not before the previous tile (so moving a tile never makes later tiles jump back).
+/// Returns (col, row) per tile and the number of rows used.
+fn pack(dims: &[(usize, usize)]) -> (Vec<(usize, usize)>, usize) {
+    let mut occ: Vec<[bool; 4]> = Vec::new();
+    let mut pos = Vec::with_capacity(dims.len());
+    let mut rows = 0;
+    let mut prev = (0usize, 0usize); // (row, col) of the previous tile
+    for &(w, h) in dims {
+        let mut r = prev.0;
+        'search: loop {
+            while occ.len() < r + h {
+                occ.push([false; 4]);
+            }
+            let c_from = if r == prev.0 { prev.1 } else { 0 };
+            for c in c_from..=4 - w {
+                if (r..r + h).all(|rr| (c..c + w).all(|cc| !occ[rr][cc])) {
+                    for rr in r..r + h {
+                        for cc in c..c + w {
+                            occ[rr][cc] = true;
+                        }
+                    }
+                    pos.push((c, r));
+                    prev = (r, c);
+                    rows = rows.max(r + h);
+                    break 'search;
+                }
+            }
+            r += 1;
+        }
+    }
+    (pos, rows)
+}
+
+fn px_x(c: usize) -> f32 {
+    c as f32 * (SW + GAP)
+}
+fn px_w(w: usize) -> f32 {
+    w as f32 * (SW + GAP) - GAP
+}
+fn px_y(r: usize) -> f32 {
+    r as f32 * V
+}
+fn px_h(h: usize) -> f32 {
+    h as f32 * V - GAP
+}
 
 fn main() -> cosmic::iced::Result {
     cosmic::applet::run::<ControlCenter>(())
@@ -97,6 +228,10 @@ struct ControlCenter {
     bar_icon: Option<String>,
     custom_icon: String,
     meters: Vec<String>,
+    layout: Vec<TileCfg>,
+    arranging: bool,
+    pointer: Point,
+    drag: Option<Drag>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +267,12 @@ enum Message {
     CustomIcon(String),
     ApplyCustomIcon,
     ToggleMeter(&'static str),
+    Arrange(bool),
+    Pointer(Point),
+    TileDragStart(String),
+    TileDrop,
+    ToggleWide(String),
+    ResetLayout,
     EditWidgets,
     Lock,
     LogOut,
@@ -395,6 +536,29 @@ fn mac_slider() -> theme::iced::Slider {
 
 // ---------- building blocks ----------
 
+/// Place `el` at (x, y) inside a stack.
+fn at<'a>(el: Element<'a, Message>, x: f32, y: f32) -> Element<'a, Message> {
+    container(el).padding(Padding { top: y, left: x, right: 0.0, bottom: 0.0 }).width(Length::Fill).height(Length::Fill).into()
+}
+
+fn slot_class() -> theme::Container<'static> {
+    theme::Container::custom(|t| {
+        let on: Color = t.cosmic().on_bg_color().into();
+        cosmic::iced::widget::container::Style {
+            border: Border { radius: 28.0.into(), width: 1.5, color: Color { a: 0.25, ..on } },
+            ..Default::default()
+        }
+    })
+}
+
+fn ghost_class() -> theme::Container<'static> {
+    theme::Container::custom(|_| cosmic::iced::widget::container::Style {
+        shadow: cosmic::iced::Shadow { color: Color::from_rgba(0.0, 0.0, 0.0, 0.35), offset: cosmic::iced::Vector::new(0.0, 6.0), blur_radius: 18.0 },
+        border: Border { radius: 28.0.into(), ..Default::default() },
+        ..Default::default()
+    })
+}
+
 fn glyph<'a>(name: &'static str, size: u16) -> Element<'a, Message> {
     icon::from_name(name).size(size).symbolic(true).into()
 }
@@ -410,7 +574,7 @@ fn chip_icon<'a>(name: &'static str, on: bool) -> Element<'a, Message> {
 }
 
 /// Pill tile: (chip) Title / subtitle.
-fn pill<'a>(icon_name: &'static str, title: &'static str, subtitle: Option<String>, on: bool, msg: Message) -> Element<'a, Message> {
+fn pill<'a>(icon_name: &'static str, title: &'static str, subtitle: Option<String>, on: bool, msg: Message, w: f32) -> Element<'a, Message> {
     let mut labels = Column::new().push(text::heading(title).size(13).wrapping(Wrapping::None));
     if let Some(sub) = subtitle {
         labels = labels.push(style::secondary_small(sub));
@@ -422,7 +586,7 @@ fn pill<'a>(icon_name: &'static str, title: &'static str, subtitle: Option<Strin
     )
     .class(tile_button(999.0, false))
     .padding([0, 10])
-        .width(Length::Fixed(COL_W))
+        .width(Length::Fixed(w))
         .height(Length::Fixed(TILE_H))
         .on_press(msg)
         .into()
@@ -487,7 +651,7 @@ fn write_meters(list: &[String]) {
 }
 
 /// Wi-Fi/Bluetooth pill, like macOS: the round chip toggles, the rest opens the menu.
-fn split_pill<'a>(icon_name: &'static str, title: &'static str, subtitle: String, on: bool, toggle: Message, open: Message) -> Element<'a, Message> {
+fn split_pill<'a>(icon_name: &'static str, title: &'static str, subtitle: String, on: bool, toggle: Message, open: Message, w: f32) -> Element<'a, Message> {
     let chip = button::custom(chip_icon(icon_name, on)).class(Button::Text).padding(0).on_press(toggle);
     let labels = button::custom(
         container(
@@ -507,7 +671,7 @@ fn split_pill<'a>(icon_name: &'static str, title: &'static str, subtitle: String
     button::custom(container(row![chip, labels].spacing(8).align_y(Alignment::Center)).height(Length::Fill).align_y(Alignment::Center))
         .class(tile_button(999.0, false))
         .padding([0, 10])
-        .width(Length::Fixed(COL_W))
+        .width(Length::Fixed(w))
         .height(Length::Fixed(TILE_H))
         .on_press(open)
         .into()
@@ -586,6 +750,14 @@ impl ControlCenter {
             .push(card(Column::new().push(icons).push(custom).spacing(10).into()))
             .push(style::section("System Monitor in Menu Bar"))
             .push(card(meters.into()))
+            .push(style::section("Layout"))
+            .push(
+                row![
+                    button::custom(text::body("Arrange Tiles…")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::Arrange(true)),
+                    button::custom(text::body("Reset Layout")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::ResetLayout),
+                ]
+                .spacing(8),
+            )
             .push(style::section("Widgets"))
             .push(
                 row![
@@ -620,7 +792,7 @@ impl ControlCenter {
         }
     }
 
-    fn now_playing(&self) -> Element<'_, Message> {
+    fn now_playing(&self, w: f32) -> Element<'_, Message> {
         let h = 2.0 * TILE_H + GAP;
         let content: Element<'_, Message> = match &self.status.media {
             Some(m) => {
@@ -657,7 +829,115 @@ impl ControlCenter {
                 .spacing(2)
                 .into(),
         };
-        container(content).padding(12).width(Length::Fixed(COL_W)).height(Length::Fixed(h)).clip(true).class(card_class()).into()
+        container(content).padding(12).width(Length::Fixed(w)).height(Length::Fixed(h)).clip(true).class(card_class()).into()
+    }
+
+    fn available(&self, id: &str) -> bool {
+        match id {
+            "touch" => self.status.touch.is_some(),
+            "display" => self.status.brightness.is_some(),
+            _ => true,
+        }
+    }
+
+    /// Pixel rectangles (x, y, w, h) of the visible tiles in order, and the grid height.
+    fn placement(&self) -> (Vec<(usize, (f32, f32, f32, f32))>, f32) {
+        let vis: Vec<(usize, &TileCfg)> = self.layout.iter().enumerate().filter(|(_, t)| self.available(&t.id)).collect();
+        let dims: Vec<(usize, usize)> = vis
+            .iter()
+            .map(|(_, t)| {
+                let (_, w, h, can) = tile_info(&t.id);
+                (if t.wide && can { (w * 2).min(4) } else { w }, h)
+            })
+            .collect();
+        let (pos, rows) = pack(&dims);
+        let rects = vis
+            .iter()
+            .enumerate()
+            .map(|(i, (li, _))| (*li, (px_x(pos[i].0), px_y(pos[i].1), px_w(dims[i].0), px_h(dims[i].1))))
+            .collect();
+        (rects, (px_h(rows)).max(1.0))
+    }
+
+    /// One tile's content, sized to `w` x its height.
+    fn tile_element(&self, id: &str, wide: bool, w: f32) -> Element<'_, Message> {
+        let s = &self.status;
+        let on_off = |on: bool| Some(if on { "On" } else { "Off" }.to_string());
+        let rec_sub = if !s.recorder { Some("Not Installed".to_string()) } else { on_off(s.recording) };
+        // a one-slot circle, or (widened) a full pill with a label
+        let small = |glyph_name: &'static str, title: &'static str, sub: Option<String>, active: bool, msg: Message| -> Element<'_, Message> {
+            if wide {
+                pill(glyph_name, title, sub, active, msg, w)
+            } else {
+                container(circle(glyph_name, active, msg)).width(Length::Fixed(w)).align_x(Alignment::Center).into()
+            }
+        };
+        match id {
+            "wifi" => {
+                let sub = if s.wifi_on { s.wifi_name.clone().unwrap_or_else(|| "Not Connected".into()) } else { "Off".into() };
+                split_pill("network-wireless-signal-excellent-symbolic", "Wi-Fi", sub, s.wifi_on, Message::Wifi, Message::ShowPage(Page::Wifi), w)
+            }
+            "bluetooth" => split_pill(
+                "bluetooth-active-symbolic",
+                "Bluetooth",
+                if s.bluetooth_on { "On" } else { "Off" }.to_string(),
+                s.bluetooth_on,
+                Message::Bluetooth,
+                Message::ShowPage(Page::Bluetooth),
+                w,
+            ),
+            "media" => self.now_playing(w),
+            "airplane" => pill("airplane-mode-symbolic", "Airplane Mode", on_off(s.airplane), s.airplane, Message::Airplane, w),
+            "overview" => small("view-app-grid-symbolic", "Mission Control", None, false, Message::Overview),
+            "displays" => small("video-display-symbolic", "Displays", None, false, Message::Open("displays")),
+            "appearance" => small("display-brightness-symbolic", "Appearance", Some(if s.dark { "Dark" } else { "Light" }.to_string()), !s.dark, Message::DarkMode),
+            "screenshot" => small("camera-photo-symbolic", "Screenshot", None, false, Message::Screenshot),
+            "focus" => pill("weather-clear-night-symbolic", "Focus", s.dnd.then(|| "Do Not Disturb".to_string()), s.dnd, Message::Focus, w),
+            "touch" => {
+                let t = s.touch.as_ref();
+                let sub = match t {
+                    Some(t) if !t.writable => "Set Up…",
+                    Some(t) if t.on => "On",
+                    _ => "Off",
+                };
+                pill("input-tablet-symbolic", "Touch", Some(sub.to_string()), t.map_or(false, |t| t.on), Message::Touch, w)
+            }
+            "display" => {
+                let (cur, max) = s.brightness.unwrap_or((0, 100));
+                container(self.slider_card(
+                    "Display",
+                    "display-brightness-low-symbolic",
+                    slider((max / 20)..=max, cur, Message::Brightness).step((max / 100).max(1)).height(22).class(mac_slider()).into(),
+                    glyph("display-brightness-high-symbolic", 16),
+                ))
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(px_h(4)))
+                .into()
+            }
+            "sound" => {
+                let vol_icon = if s.muted || s.volume == 0 { "audio-volume-muted-symbolic" } else { "audio-volume-low-symbolic" };
+                container(self.slider_card(
+                    "Sound",
+                    vol_icon,
+                    slider(0..=100u32, s.volume.min(100), Message::Volume).height(22).class(mac_slider()).into(),
+                    row![
+                        glyph("audio-volume-high-symbolic", 16),
+                        button::custom(glyph("audio-speakers-symbolic", 16)).class(tile_button(999.0, false)).padding(6).on_press(Message::Open("sound")),
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .into(),
+                ))
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(px_h(4)))
+                .into()
+            }
+            "rec-sel" => pill("selection-mode-symbolic", "Record Selection", rec_sub, s.recording, Message::Record { choose: true }, w),
+            "capture" => pill("applets-screenshooter-symbolic", "Capture", None, false, Message::Screenshot, w),
+            "rec-screen" => pill("media-record-symbolic", "Record Screen", rec_sub, s.recording, Message::Record { choose: false }, w),
+            "record" => pill("camera-video-symbolic", "Record", on_off(s.recording), s.recording, Message::Record { choose: false }, w),
+            _ => space::horizontal().into(),
+        }
     }
 
     fn slider_card<'a>(&self, title: &'static str, low: &'static str, bar: Element<'a, Message>, high: Element<'a, Message>) -> Element<'a, Message> {
@@ -681,7 +961,7 @@ impl cosmic::Application for ControlCenter {
     const APP_ID: &'static str = APP_ID;
 
     fn init(core: app::Core, _flags: ()) -> (Self, app::Task<Message>) {
-        (Self { core, ..Default::default() }, refresh_task())
+        (Self { core, layout: load_layout(), ..Default::default() }, refresh_task())
     }
 
     fn core(&self) -> &app::Core {
@@ -707,7 +987,7 @@ impl cosmic::Application for ControlCenter {
                         app.core.applet.get_popup_settings(app.core.main_window_id().unwrap(), new_id, Some((1, 1)), None, None)
                     },
                     None,
-                )).chain(style::blur(new_id));
+                )).chain(style::blur(new_id)).chain(style::blur_soon(new_id, 150)).chain(style::blur_soon(new_id, 700));
                 return Task::batch([open, refresh_task()]);
             }
             Message::CloseRequested(id) => {
@@ -727,9 +1007,14 @@ impl cosmic::Application for ControlCenter {
                         _ => Page::Main,
                     };
                     let opening = self.popup.is_none();
+                    let arrange = page.trim() == "arrange";
                     let toggle = self.update(Message::TogglePopup);
                     if opening && target != Page::Main {
                         return Task::batch([toggle, self.update(Message::ShowPage(target))]);
+                    }
+                    if opening && arrange {
+                        // `echo arrange > …/open/<app id>` opens straight into tile arranging
+                        return Task::batch([toggle, self.update(Message::Arrange(true))]);
                     }
                     return toggle;
                 }
@@ -940,6 +1225,55 @@ impl cosmic::Application for ControlCenter {
                     return self.update(Message::SetBarIcon(Some(v)));
                 }
             }
+            Message::Arrange(on) => {
+                self.arranging = on;
+                self.drag = None;
+                self.page = Page::Main;
+            }
+            Message::Pointer(p) => {
+                self.pointer = p;
+                if let Some(d) = &self.drag {
+                    let (rects, _) = self.placement();
+                    let target = rects
+                        .iter()
+                        .find(|(li, (x, y, w, h))| self.layout[*li].id != d.id && p.x >= *x && p.x <= x + w && p.y >= *y && p.y <= y + h)
+                        .map(|(li, _)| self.layout[*li].id.clone());
+                    if let Some(target) = target {
+                        if d.last_target.as_deref() != Some(target.as_str()) {
+                            let from = self.layout.iter().position(|t| t.id == d.id);
+                            let to = self.layout.iter().position(|t| t.id == target);
+                            if let (Some(from), Some(to)) = (from, to) {
+                                let item = self.layout.remove(from);
+                                self.layout.insert(to, item);
+                            }
+                            if let Some(d) = &mut self.drag {
+                                d.last_target = Some(target);
+                            }
+                        }
+                    }
+                }
+            }
+            Message::TileDragStart(id) => {
+                let (rects, _) = self.placement();
+                if let Some((_, (x, y, _, _))) = rects.iter().find(|(li, _)| self.layout[*li].id == id) {
+                    self.drag = Some(Drag { id, grab: Point::new(self.pointer.x - x, self.pointer.y - y), last_target: None });
+                }
+            }
+            Message::TileDrop => {
+                if self.drag.take().is_some() {
+                    save_layout(&self.layout);
+                }
+            }
+            Message::ToggleWide(id) => {
+                if let Some(t) = self.layout.iter_mut().find(|t| t.id == id) {
+                    t.wide = !t.wide;
+                }
+                save_layout(&self.layout);
+            }
+            Message::ResetLayout => {
+                self.layout = DEFAULT_TILES.iter().map(|id| TileCfg { id: id.to_string(), wide: false }).collect();
+                save_layout(&self.layout);
+            }
             Message::ToggleMeter(m) => {
                 if let Some(i) = self.meters.iter().position(|x| x == m) {
                     if self.meters.len() > 1 {
@@ -1022,102 +1356,89 @@ impl cosmic::Application for ControlCenter {
             Page::Customize => return self.customize_view(),
             Page::Main => {}
         }
-        let s = &self.status;
-        let on_off = |on: bool| Some(if on { "On" } else { "Off" }.to_string());
-
-        // Connectivity pills + Now Playing
-        let wifi_sub = if s.wifi_on { s.wifi_name.clone().unwrap_or_else(|| "Not Connected".into()) } else { "Off".into() };
-        let conn = Column::new()
-            .push(split_pill("network-wireless-signal-excellent-symbolic", "Wi-Fi", wifi_sub, s.wifi_on, Message::Wifi, Message::ShowPage(Page::Wifi)))
-            .push(split_pill(
-                "bluetooth-active-symbolic",
-                "Bluetooth",
-                if s.bluetooth_on { "On" } else { "Off" }.to_string(),
-                s.bluetooth_on,
-                Message::Bluetooth,
-                Message::ShowPage(Page::Bluetooth),
-            ))
-            .spacing(GAP);
-        let block1 = row![conn, self.now_playing()].spacing(GAP);
-
-        let block2 = row![
-            pill("airplane-mode-symbolic", "Airplane Mode", on_off(s.airplane), s.airplane, Message::Airplane),
-            circle_pair(
-                circle("view-app-grid-symbolic", false, Message::Overview),
-                circle("video-display-symbolic", false, Message::Open("displays")),
-            ),
-        ]
-        .spacing(GAP);
-
-        let block3 = row![
-            circle_pair(
-                circle("display-brightness-symbolic", !s.dark, Message::DarkMode),
-                circle("camera-photo-symbolic", false, Message::Screenshot),
-            ),
-            pill("weather-clear-night-symbolic", "Focus", s.dnd.then(|| "Do Not Disturb".to_string()), s.dnd, Message::Focus),
-        ]
-        .spacing(GAP);
-
-        let mut grid = Column::new().push(block1).push(block2).push(block3).spacing(GAP);
-        if let Some(t) = &s.touch {
-            let sub = if !t.writable { "Set Up…" } else if t.on { "On" } else { "Off" };
-            grid = grid.push(row![pill("input-tablet-symbolic", "Touch", Some(sub.to_string()), t.on, Message::Touch)].spacing(GAP));
+        // ---- the tile grid: absolutely positioned tiles in a stack, so tiles can be tall,
+        //      wide, dragged and re-ordered ----
+        let (rects, grid_h) = self.placement();
+        let mut stack = Stack::new().width(Length::Fixed(GRID_W)).height(Length::Fixed(grid_h));
+        for (li, (x, y, w, h)) in &rects {
+            let t = &self.layout[*li];
+            let (_, _, _, can_widen) = tile_info(&t.id);
+            if self.drag.as_ref().is_some_and(|d| d.id == t.id) {
+                // empty slot where the dragged tile came from
+                stack = stack.push(at(
+                    container(space::horizontal()).width(Length::Fixed(*w)).height(Length::Fixed(*h)).class(slot_class()).into(),
+                    *x,
+                    *y,
+                ));
+                continue;
+            }
+            stack = stack.push(at(self.tile_element(&t.id, t.wide, *w), *x, *y));
+            if self.arranging {
+                // a transparent layer that catches the press so the tile never fires, and starts a drag
+                stack = stack.push(at(
+                    mouse_area(container(space::horizontal()).width(Length::Fixed(*w)).height(Length::Fixed(*h)))
+                        .on_press(Message::TileDragStart(t.id.clone()))
+                        .into(),
+                    *x,
+                    *y,
+                ));
+                if can_widen {
+                    let label = if t.wide { "1×" } else { "2×" };
+                    stack = stack.push(at(
+                        button::custom(container(text::body(label).size(11).font(cosmic::font::bold()).class(theme::Text::Color(Color::BLACK))).width(Length::Fixed(28.0)).height(Length::Fixed(22.0)).align_x(Alignment::Center).align_y(Alignment::Center))
+                            .class(tile_button(999.0, true))
+                            .padding(0)
+                            .on_press(Message::ToggleWide(t.id.clone()))
+                            .into(),
+                        x + w - 34.0,
+                        y + 4.0,
+                    ));
+                }
+            }
         }
-
-        if let Some((cur, max)) = s.brightness {
-            grid = grid.push(self.slider_card(
-                "Display",
-                "display-brightness-low-symbolic",
-                slider((max / 20)..=max, cur, Message::Brightness).step((max / 100).max(1)).height(22).class(mac_slider()).into(),
-                glyph("display-brightness-high-symbolic", 16),
-            ));
+        if let Some(d) = &self.drag {
+            if let Some(t) = self.layout.iter().find(|t| t.id == d.id) {
+                if let Some((_, (_, _, w, h))) = rects.iter().find(|(li, _)| self.layout[*li].id == d.id) {
+                    let gx = (self.pointer.x - d.grab.x).clamp(-10.0, GRID_W - *w + 10.0);
+                    let gy = (self.pointer.y - d.grab.y).clamp(-10.0, grid_h - *h + 10.0);
+                    let _ = h;
+                    stack = stack.push(at(
+                        container(self.tile_element(&t.id, t.wide, *w)).class(ghost_class()).into(),
+                        gx,
+                        gy,
+                    ));
+                }
+            }
         }
-        let vol_icon = if s.muted || s.volume == 0 { "audio-volume-muted-symbolic" } else { "audio-volume-low-symbolic" };
-        grid = grid.push(self.slider_card(
-            "Sound",
-            vol_icon,
-            slider(0..=100u32, s.volume.min(100), Message::Volume).height(22).class(mac_slider()).into(),
-            row![
-                glyph("audio-volume-high-symbolic", 16),
-                button::custom(glyph("audio-speakers-symbolic", 16)).class(tile_button(999.0, false)).padding(6).on_press(Message::Open("sound")),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .into(),
-        ));
-
-        let rec_sub = if !s.recorder {
-            Some("Not Installed".to_string())
+        let grid: Element<'_, Message> = if self.arranging {
+            mouse_area(stack).on_move(Message::Pointer).on_release(Message::TileDrop).into()
         } else {
-            on_off(s.recording)
+            stack.into()
         };
-        grid = grid
-            .push(
-                row![
-                    pill("selection-mode-symbolic", "Record Selection", rec_sub.clone(), s.recording, Message::Record { choose: true }),
-                    pill("applets-screenshooter-symbolic", "Capture", None, false, Message::Screenshot),
-                ]
-                .spacing(GAP),
-            )
-            .push(
-                row![
-                    pill("media-record-symbolic", "Record Screen", rec_sub, s.recording, Message::Record { choose: false }),
-                    pill("camera-video-symbolic", "Record", on_off(s.recording), s.recording, Message::Record { choose: false }),
-                ]
-                .spacing(GAP),
-            );
 
         // Power row (macOS keeps these in the Apple menu; COSMIC has none, so they live here).
         let power = |name: &'static str, msg: Message| button::custom(glyph(name, 16)).class(tile_button(999.0, false)).padding(9).on_press(msg);
-        let footer = Row::new()
-            .push(power("system-lock-screen-symbolic", Message::Lock))
-            .push(power("system-log-out-symbolic", Message::LogOut))
-            .push(power("system-reboot-symbolic", Message::Restart))
-            .push(power("system-shutdown-symbolic", Message::ShutDown))
-            .push(space::horizontal())
-            .push(button::custom(text::body("Edit Controls")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::ShowPage(Page::Customize)))
-            .spacing(8)
-            .align_y(Alignment::Center);
+        let footer: Element<'_, Message> = if self.arranging {
+            Row::new()
+                .push(style::secondary_small("Drag to move · 2× widens"))
+                .push(space::horizontal())
+                .push(button::custom(text::body("Reset")).class(tile_button(999.0, false)).padding([6, 12]).on_press(Message::ResetLayout))
+                .push(button::custom(text::body("Done")).class(tile_button(999.0, true)).padding([6, 14]).on_press(Message::Arrange(false)))
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into()
+        } else {
+            Row::new()
+                .push(power("system-lock-screen-symbolic", Message::Lock))
+                .push(power("system-log-out-symbolic", Message::LogOut))
+                .push(power("system-reboot-symbolic", Message::Restart))
+                .push(power("system-shutdown-symbolic", Message::ShutDown))
+                .push(space::horizontal())
+                .push(button::custom(text::body("Edit Controls")).class(tile_button(999.0, false)).padding([6, 14]).on_press(Message::ShowPage(Page::Customize)))
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into()
+        };
 
         let content = Column::new().push(grid).push(footer).spacing(14).padding(PAD);
         style::popover(content, WIDTH)

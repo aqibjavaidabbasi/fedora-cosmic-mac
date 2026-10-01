@@ -140,7 +140,7 @@ impl cosmic::Application for Battery {
                         )
                     },
                     None,
-                )).chain(style::blur(new_id));
+                )).chain(style::blur(new_id)).chain(style::blur_soon(new_id, 150)).chain(style::blur_soon(new_id, 700));
             }
             Message::CloseRequested(id) => {
                 if Some(id) == self.popup {

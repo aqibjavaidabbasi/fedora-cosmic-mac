@@ -302,7 +302,7 @@ impl cosmic::Application for Stats {
                         app.core.applet.get_popup_settings(app.core.main_window_id().unwrap(), new_id, Some((1, 1)), None, None)
                     },
                     None,
-                )).chain(style::blur(new_id));
+                )).chain(style::blur(new_id)).chain(style::blur_soon(new_id, 150)).chain(style::blur_soon(new_id, 700));
             }
             Message::CloseRequested(id) => {
                 if Some(id) == self.popup {
