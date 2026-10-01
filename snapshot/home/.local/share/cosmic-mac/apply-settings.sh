@@ -245,6 +245,13 @@ sed '/^\[Desktop Entry\]/a NoDisplay=true' /usr/share/applications/com.system76.
 # Files windows get a blurred see-through sidebar (the patched compositor reads this list)
 [ -f ~/.config/cosmic-mac/blur-apps ] || printf '# Apps whose windows are blurred behind, like macOS vibrancy (one app id per line)\norg.gnome.Nautilus\ncom.system76.CosmicStore\n' > ~/.config/cosmic-mac/blur-apps
 
+# Window buttons on the left like macOS (GTK apps; the style is in gtk/mac-titlebar.css)
+gsettings set org.gnome.desktop.wm.preferences button-layout 'close,minimize,maximize:' 2>/dev/null || true
+for d in gtk-3.0 gtk-4.0; do
+    f=~/.config/$d/settings.ini; mkdir -p ~/.config/$d; [ -f "$f" ] || printf '[Settings]\n' > "$f"
+    grep -q gtk-decoration-layout "$f" || echo "gtk-decoration-layout=close,minimize,maximize:" >> "$f"
+done
+
 # --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
 "$HOME/.local/share/cosmic-mac/gtk-css.sh"
 
