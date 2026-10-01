@@ -256,6 +256,17 @@ done
 flatpak list --app --columns=application 2>/dev/null | grep -qx io.github._0_don.clippy \
     && flatpak override --user --own-name='org.kde.*' io.github._0_don.clippy
 
+# Clippy opens its history window "at the cursor", but XWayland reports a stale pointer
+# position, so the window landed on a screen where it never got focus and hid at once.
+# Opening it centered works (the history window then appears reliably).
+CL=~/.var/app/io.github._0_don.clippy/data/clippy/clippy.sqlite
+[ -f "$CL" ] && python3 - "$CL" <<'PY' 2>/dev/null || true
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1], timeout=5)
+c.execute("update settings set position='center' where position='cursor'")
+c.commit()
+PY
+
 # --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
 "$HOME/.local/share/cosmic-mac/gtk-css.sh"
 
