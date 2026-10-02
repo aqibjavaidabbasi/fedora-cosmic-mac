@@ -34,6 +34,10 @@ thread_local! {
     static MAC_HOVER: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
     /// Current scale of each dock item, by item id.
     static MAC_SCALE: std::cell::RefCell<FxHashMap<u32, f32>> = std::cell::RefCell::new(FxHashMap::default());
+    /// Where each item's scale is heading; MAC_SCALE eases toward it every frame.
+    static MAC_TARGET: std::cell::RefCell<FxHashMap<u32, f32>> = std::cell::RefCell::new(FxHashMap::default());
+    /// Set while the scales are still easing (keeps the frame ticker running).
+    static MAC_ANIM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Magnification by distance (in icons) from the hovered one.
@@ -135,10 +139,51 @@ sub(r"fn app_list_icon_style\(selected: bool\) -> cosmic::theme::Button \{\n",
     "    let selected = _selected;\n")
 
 # --- hover message ------------------------------------------------------------
-sub(r"(enum Message \{\n    Wayland\(WaylandUpdate\),)", r"\1\n    MacHover(Option<f32>),")
+sub(r"(enum Message \{\n    Wayland\(WaylandUpdate\),)", r"\1\n    MacHover(Option<f32>),\n    MacPointer(window::Id, Option<cosmic::iced::Point>),\n    MacTick,")
 sub(r"(    fn update\(&mut self, message: Self::Message\) -> app::Task<Self::Message> \{\n        match message \{\n)",
     r"""\1            Message::MacHover(pos) => {
                 MAC_HOVER.with(|h| h.set(pos));
+                return Task::none();
+            }
+            Message::MacPointer(id, pos) => {
+                // Raw pointer events of the dock window: a mouse_area misses them once an
+                // icon button under the pointer handles them, which left the magnification stuck.
+                if self.core.main_window_id() == Some(id) {
+                    let horizontal = matches!(self.core.applet.anchor, PanelAnchor::Top | PanelAnchor::Bottom);
+                    MAC_HOVER.with(|h| h.set(pos.map(|p| if horizontal { p.x } else { p.y })));
+                    MAC_ANIM.with(|a| a.set(true));
+                }
+                return Task::none();
+            }
+            Message::MacTick => {
+                // ease every item's scale toward its target (about 60 times a second)
+                let still = MAC_SCALE.with(|cur| {
+                    MAC_TARGET.with(|tg| {
+                        let mut c = cur.borrow_mut();
+                        let t = tg.borrow();
+                        let mut ids: Vec<u32> = c.keys().chain(t.keys()).copied().collect();
+                        ids.sort_unstable();
+                        ids.dedup();
+                        let mut still = false;
+                        for id in ids {
+                            let a = c.get(&id).copied().unwrap_or(1.0);
+                            let b = t.get(&id).copied().unwrap_or(1.0);
+                            let mut n = a + (b - a) * 0.38;
+                            if (n - b).abs() < 0.004 {
+                                n = b;
+                            } else {
+                                still = true;
+                            }
+                            if (n - 1.0).abs() < 0.004 {
+                                c.remove(&id);
+                            } else {
+                                c.insert(id, n);
+                            }
+                        }
+                        still
+                    })
+                });
+                MAC_ANIM.with(|a| a.set(still));
                 return Task::none();
             }
 """)
@@ -182,7 +227,7 @@ sub(r"(        let divider_padding = match self\.core\.applet\.size \{\n)",
                     }
                 }
             }
-            MAC_SCALE.with(|m| *m.borrow_mut() = map);
+            MAC_TARGET.with(|m| *m.borrow_mut() = map);
         }
 \1""")
 
@@ -204,9 +249,6 @@ sub(r"(        self\.core\n            \.applet\n            \.autosize_window\(
                 .into()
         };
         let content = iced::widget::Stack::new().push(content).push_under(shelf);
-        let content = mouse_area(content)
-            .on_move(move |p| Message::MacHover(Some(if is_horizontal { p.x } else { p.y })))
-            .on_exit(Message::MacHover(None));
 \1""")
 
 # --- the favorites/running divider is a short line on the shelf, not a full-height rule
@@ -220,5 +262,22 @@ sub(r"                container\(vertical_rule\(1\)\)\n                    \.hei
                         .height(Length::Fill)
                         .into()
                 },""")
+
+sub(r"(                cosmic::iced::core::Event::Mouse\(\n                    cosmic::iced::core::mouse::Event::ButtonPressed\(_\),\n                \) => Some\(Message::Pressed\(id\)\),\n)",
+    r"""\1                cosmic::iced::core::Event::Mouse(cosmic::iced::core::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::MacPointer(id, Some(position)))
+                }
+                cosmic::iced::core::Event::Mouse(cosmic::iced::core::mouse::Event::CursorLeft) => {
+                    Some(Message::MacPointer(id, None))
+                }
+""")
+
+sub(r"(    fn subscription\(&self\) -> Subscription<Message> \{\n        Subscription::batch\(\[\n)",
+    r"""\1            if MAC_ANIM.with(|a| a.get()) {
+                cosmic::iced::time::every(Duration::from_millis(16)).map(|_| Message::MacTick)
+            } else {
+                Subscription::none()
+            },
+""")
 
 open(p, "w").write(s)

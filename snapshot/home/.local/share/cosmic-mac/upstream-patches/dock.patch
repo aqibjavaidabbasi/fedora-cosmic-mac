@@ -1,8 +1,8 @@
 diff --git a/cosmic-app-list/src/app.rs b/cosmic-app-list/src/app.rs
-index 8db96ee..eacdb6a 100755
+index 8db96ee..fd9deab 100755
 --- a/cosmic-app-list/src/app.rs
 +++ b/cosmic-app-list/src/app.rs
-@@ -83,10 +83,62 @@ struct AppletIconData {
+@@ -83,10 +83,66 @@ struct AppletIconData {
  
  static DND_FAVORITES: u64 = u64::MAX;
  
@@ -12,6 +12,10 @@ index 8db96ee..eacdb6a 100755
 +    static MAC_HOVER: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
 +    /// Current scale of each dock item, by item id.
 +    static MAC_SCALE: std::cell::RefCell<FxHashMap<u32, f32>> = std::cell::RefCell::new(FxHashMap::default());
++    /// Where each item's scale is heading; MAC_SCALE eases toward it every frame.
++    static MAC_TARGET: std::cell::RefCell<FxHashMap<u32, f32>> = std::cell::RefCell::new(FxHashMap::default());
++    /// Set while the scales are still easing (keeps the frame ticker running).
++    static MAC_ANIM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 +}
 +
 +/// Magnification by distance (in icons) from the hovered one.
@@ -66,7 +70,7 @@ index 8db96ee..eacdb6a 100755
          let (h_padding, v_padding) = if applet.is_horizontal() {
              (major_padding as f32, cross_padding as f32)
          } else {
-@@ -136,6 +188,17 @@ impl AppletIconData {
+@@ -136,6 +192,17 @@ impl AppletIconData {
                  h_padding,
              ],
          };
@@ -84,7 +88,7 @@ index 8db96ee..eacdb6a 100755
          AppletIconData {
              icon_size,
              icon_spacing,
-@@ -209,14 +272,24 @@ impl DockItem {
+@@ -209,14 +276,24 @@ impl DockItem {
          let toplevel_count = filtered_toplevels.len();
  
          let app_icon = AppletIconData::new(applet);
@@ -111,15 +115,17 @@ index 8db96ee..eacdb6a 100755
  
          let indicator = {
              let container = if toplevel_count <= 1 {
-@@ -390,6 +463,7 @@ pub enum PopupType {
+@@ -390,6 +467,9 @@ pub enum PopupType {
  #[derive(Debug, Clone)]
  enum Message {
      Wayland(WaylandUpdate),
 +    MacHover(Option<f32>),
++    MacPointer(window::Id, Option<cosmic::iced::Point>),
++    MacTick,
      PinApp(u32),
      UnpinApp(u32),
      Popup(u32, window::Id),
-@@ -598,7 +672,22 @@ fn window_menu_style(selected: bool) -> cosmic::theme::Button {
+@@ -598,7 +678,22 @@ fn window_menu_style(selected: bool) -> cosmic::theme::Button {
      }
  }
  
@@ -143,7 +149,7 @@ index 8db96ee..eacdb6a 100755
      Button::Custom {
          active: Box::new(move |focused, theme| {
              let a = button::Catalog::active(theme, focused, selected, &Button::AppletIcon);
-@@ -889,6 +978,10 @@ impl cosmic::Application for CosmicAppList {
+@@ -889,6 +984,51 @@ impl cosmic::Application for CosmicAppList {
  
      fn update(&mut self, message: Self::Message) -> app::Task<Self::Message> {
          match message {
@@ -151,10 +157,51 @@ index 8db96ee..eacdb6a 100755
 +                MAC_HOVER.with(|h| h.set(pos));
 +                return Task::none();
 +            }
++            Message::MacPointer(id, pos) => {
++                // Raw pointer events of the dock window: a mouse_area misses them once an
++                // icon button under the pointer handles them, which left the magnification stuck.
++                if self.core.main_window_id() == Some(id) {
++                    let horizontal = matches!(self.core.applet.anchor, PanelAnchor::Top | PanelAnchor::Bottom);
++                    MAC_HOVER.with(|h| h.set(pos.map(|p| if horizontal { p.x } else { p.y })));
++                    MAC_ANIM.with(|a| a.set(true));
++                }
++                return Task::none();
++            }
++            Message::MacTick => {
++                // ease every item's scale toward its target (about 60 times a second)
++                let still = MAC_SCALE.with(|cur| {
++                    MAC_TARGET.with(|tg| {
++                        let mut c = cur.borrow_mut();
++                        let t = tg.borrow();
++                        let mut ids: Vec<u32> = c.keys().chain(t.keys()).copied().collect();
++                        ids.sort_unstable();
++                        ids.dedup();
++                        let mut still = false;
++                        for id in ids {
++                            let a = c.get(&id).copied().unwrap_or(1.0);
++                            let b = t.get(&id).copied().unwrap_or(1.0);
++                            let mut n = a + (b - a) * 0.38;
++                            if (n - b).abs() < 0.004 {
++                                n = b;
++                            } else {
++                                still = true;
++                            }
++                            if (n - 1.0).abs() < 0.004 {
++                                c.remove(&id);
++                            } else {
++                                c.insert(id, n);
++                            }
++                        }
++                        still
++                    })
++                });
++                MAC_ANIM.with(|a| a.set(still));
++                return Task::none();
++            }
              Message::Popup(id, parent_window_id) => {
                  if let Some(Popup {
                      parent,
-@@ -1763,6 +1856,45 @@ impl cosmic::Application for CosmicAppList {
+@@ -1763,6 +1903,45 @@ impl cosmic::Application for CosmicAppList {
              PanelAnchor::Top | PanelAnchor::Bottom => true,
              PanelAnchor::Left | PanelAnchor::Right => false,
          };
@@ -195,12 +242,12 @@ index 8db96ee..eacdb6a 100755
 +                    }
 +                }
 +            }
-+            MAC_SCALE.with(|m| *m.borrow_mut() = map);
++            MAC_TARGET.with(|m| *m.borrow_mut() = map);
 +        }
          let divider_padding = match self.core.applet.size {
              Size::Hardcoded(_) => 4,
              Size::PanelSize(ref s) => {
-@@ -1999,10 +2131,15 @@ impl cosmic::Application for CosmicAppList {
+@@ -1999,10 +2178,15 @@ impl cosmic::Application for CosmicAppList {
                  )
                  .drag_id(DND_FAVORITES),
                  row(active).spacing(app_icon.icon_spacing).into(),
@@ -220,7 +267,7 @@ index 8db96ee..eacdb6a 100755
              )
          } else {
              (
-@@ -2074,6 +2211,25 @@ impl cosmic::Application for CosmicAppList {
+@@ -2074,6 +2258,22 @@ impl cosmic::Application for CosmicAppList {
              }
          }
  
@@ -240,9 +287,31 @@ index 8db96ee..eacdb6a 100755
 +                .into()
 +        };
 +        let content = iced::widget::Stack::new().push(content).push_under(shelf);
-+        let content = mouse_area(content)
-+            .on_move(move |p| Message::MacHover(Some(if is_horizontal { p.x } else { p.y })))
-+            .on_exit(Message::MacHover(None));
          self.core
              .applet
              .autosize_window(content)
+@@ -2508,6 +2708,11 @@ impl cosmic::Application for CosmicAppList {
+ 
+     fn subscription(&self) -> Subscription<Message> {
+         Subscription::batch([
++            if MAC_ANIM.with(|a| a.get()) {
++                cosmic::iced::time::every(Duration::from_millis(16)).map(|_| Message::MacTick)
++            } else {
++                Subscription::none()
++            },
+             wayland_subscription().map(Message::Wayland),
+             listen_with(|e, _, id| match e {
+                 cosmic::iced::core::Event::PlatformSpecific(event::PlatformSpecific::Wayland(
+@@ -2519,6 +2724,12 @@ impl cosmic::Application for CosmicAppList {
+                 cosmic::iced::core::Event::Mouse(
+                     cosmic::iced::core::mouse::Event::ButtonPressed(_),
+                 ) => Some(Message::Pressed(id)),
++                cosmic::iced::core::Event::Mouse(cosmic::iced::core::mouse::Event::CursorMoved { position }) => {
++                    Some(Message::MacPointer(id, Some(position)))
++                }
++                cosmic::iced::core::Event::Mouse(cosmic::iced::core::mouse::Event::CursorLeft) => {
++                    Some(Message::MacPointer(id, None))
++                }
+                 _ => None,
+             }),
+             rectangle_tracker_subscription(0).map(|update| Message::Rectangle(update.1)),

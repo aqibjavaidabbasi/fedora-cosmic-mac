@@ -1,8 +1,114 @@
+diff --git a/src/backend/wayland/screencopy.rs b/src/backend/wayland/screencopy.rs
+index b9692e0..1e90e0a 100644
+--- a/src/backend/wayland/screencopy.rs
++++ b/src/backend/wayland/screencopy.rs
+@@ -158,11 +158,12 @@ impl ScreencopyHandler for AppData {
+         let conn = conn.clone();
+         let release = session.release.take();
+         let qh = qh.clone();
+-        self.thread_pool.spawn_ok(async move {
++        std::thread::spawn(move || {
+             if let Some(release) = release {
+                 // Wait for buffer to be released by server
+-                release.await;
++                cosmic::iced::futures::executor::block_on(release);
+             }
++            std::thread::sleep(std::time::Duration::from_millis(90));
+             let mut session = capture_clone.session.lock().unwrap();
+             let Some(session) = session.as_mut() else {
+                 return;
+diff --git a/src/main.rs b/src/main.rs
+index 4ba8e05..ab02e3e 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -112,6 +112,7 @@ enum Msg {
+     UpdateToplevelIcon(String, Option<PathBuf>),
+     OnScroll(wl_output::WlOutput, ScrollDelta),
+     TogglePinned(ExtWorkspaceHandleV1),
++    RemoveWorkspace(ExtWorkspaceHandleV1, wl_output::WlOutput),
+     EnteredWorkspaceSidebarEntry(ExtWorkspaceHandleV1, bool),
+     DbusInterface(zbus::Result<dbus::Interface>),
+     DBus(dbus::Event),
+@@ -990,6 +991,43 @@ impl Application for App {
+                     }
+                 }
+             }
++            Msg::RemoveWorkspace(handle, output) => {
++                let siblings: Vec<ExtWorkspaceHandleV1> =
++                    self.workspaces.for_output(&output).map(|w| w.handle().clone()).collect();
++                if let Some(idx) = siblings.iter().position(|h| *h == handle) {
++                    let target = if idx > 0 { siblings.get(idx - 1) } else { siblings.get(1) };
++                    if let Some(target) = target.cloned() {
++                        let (pinned, active) = self
++                            .workspaces
++                            .for_handle(&handle)
++                            .map(|w| (w.is_pinned(), w.is_active()))
++                            .unwrap_or_default();
++                        if pinned {
++                            self.send_wayland_cmd(backend::Cmd::SetWorkspacePinned(handle.clone(), false));
++                        }
++                        if active {
++                            self.send_wayland_cmd(backend::Cmd::ActivateWorkspace(target.clone()));
++                        }
++                        let moving: Vec<ExtForeignToplevelHandleV1> = self
++                            .toplevels
++                            .0
++                            .iter()
++                            .filter(|t| t.info.workspace.contains(&handle.id()))
++                            .map(|t| t.handle.clone())
++                            .collect();
++                        for t in moving {
++                            if let Some(top) = self.toplevels.for_handle_mut(&t) {
++                                top.pending_move = Some(target.clone());
++                            }
++                            self.send_wayland_cmd(backend::Cmd::MoveToplevelToWorkspace(
++                                t,
++                                target.clone(),
++                                output.clone(),
++                            ));
++                        }
++                    }
++                }
++            }
+             Msg::TogglePinned(workspace_handle) => {
+                 if let Some(workspace) = self.workspaces.for_handle(&workspace_handle) {
+                     self.send_wayland_cmd(backend::Cmd::SetWorkspacePinned(
 diff --git a/src/view/mod.rs b/src/view/mod.rs
-index ae2b727..53bd1cf 100644
+index ae2b727..af2820d 100644
 --- a/src/view/mod.rs
 +++ b/src/view/mod.rs
-@@ -490,6 +490,14 @@ fn workspaces_sidebar<'a>(
+@@ -216,6 +216,21 @@ fn pin_button(workspace: &Workspace) -> cosmic::Element<'static, Msg> {
+     .into()
+ }
+ 
++fn close_workspace_button(workspace: &Workspace, output: &wl_output::WlOutput) -> cosmic::Element<'static, Msg> {
++    crate::widgets::visibility_wrapper(
++        widget::button::custom(
++            widget::icon::from_name("window-close-symbolic")
++                .symbolic(true)
++                .size(16),
++        )
++        .padding([4, 8])
++        .class(cosmic::theme::Button::Standard)
++        .on_press(Msg::RemoveWorkspace(workspace.handle().clone(), output.clone())),
++        workspace.has_cursor,
++    )
++    .into()
++}
++
+ fn workspace_item_appearance(
+     theme: &cosmic::Theme,
+     is_active: bool,
+@@ -286,7 +301,7 @@ fn workspace_item(
+     };
+ 
+     let workspace_footer = row![
+-        widget::space::horizontal().width(Length::Fixed(32.0)),
++        close_workspace_button(workspace, _output),
+         widget::text::body(fl!("workspace", number = workspace.info.name.as_str()))
+             .ellipsize(Ellipsize::Middle(EllipsizeHeightLimit::Lines(1)))
+             .apply(widget::container)
+@@ -490,6 +505,14 @@ fn workspaces_sidebar<'a>(
      };
      let sidebar_entries_container =
          widget::container(crate::widgets::workspace_bar(sidebar_entries, axis)).padding(8.0);

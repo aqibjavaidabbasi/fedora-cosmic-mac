@@ -26,3 +26,100 @@ s, n = re.subn(
 if n != 1:
     sys.exit(1)
 open(p, "w").write(s)
+
+# --- close button on each workspace thumbnail (like the x on a macOS Space): its windows move
+# to the neighbouring workspace and the empty one goes away. Shown while hovered.
+p = "src/view/mod.rs"
+s = open(p).read()
+s, n1 = re.subn(
+    r"    let workspace_footer = row!\[\n        widget::space::horizontal\(\)\.width\(Length::Fixed\(32\.0\)\),",
+    "    let workspace_footer = row![\n        close_workspace_button(workspace, _output),",
+    s, count=1)
+s, n2 = re.subn(
+    r"(fn workspace_item_appearance\()",
+    """fn close_workspace_button(workspace: &Workspace, output: &wl_output::WlOutput) -> cosmic::Element<'static, Msg> {
+    crate::widgets::visibility_wrapper(
+        widget::button::custom(
+            widget::icon::from_name("window-close-symbolic")
+                .symbolic(true)
+                .size(16),
+        )
+        .padding([4, 8])
+        .class(cosmic::theme::Button::Standard)
+        .on_press(Msg::RemoveWorkspace(workspace.handle().clone(), output.clone())),
+        workspace.has_cursor,
+    )
+    .into()
+}
+
+\\1""",
+    s, count=1)
+open(p, "w").write(s)
+
+p = "src/main.rs"
+s = open(p).read()
+s, n3 = re.subn(r"(\n    TogglePinned\(ExtWorkspaceHandleV1\),)", r"\1\n    RemoveWorkspace(ExtWorkspaceHandleV1, wl_output::WlOutput),", s, count=1)
+s, n4 = re.subn(
+    r"(            Msg::TogglePinned\(workspace_handle\) => \{)",
+    """            Msg::RemoveWorkspace(handle, output) => {
+                let siblings: Vec<ExtWorkspaceHandleV1> =
+                    self.workspaces.for_output(&output).map(|w| w.handle().clone()).collect();
+                if let Some(idx) = siblings.iter().position(|h| *h == handle) {
+                    let target = if idx > 0 { siblings.get(idx - 1) } else { siblings.get(1) };
+                    if let Some(target) = target.cloned() {
+                        let (pinned, active) = self
+                            .workspaces
+                            .for_handle(&handle)
+                            .map(|w| (w.is_pinned(), w.is_active()))
+                            .unwrap_or_default();
+                        if pinned {
+                            self.send_wayland_cmd(backend::Cmd::SetWorkspacePinned(handle.clone(), false));
+                        }
+                        if active {
+                            self.send_wayland_cmd(backend::Cmd::ActivateWorkspace(target.clone()));
+                        }
+                        let moving: Vec<ExtForeignToplevelHandleV1> = self
+                            .toplevels
+                            .0
+                            .iter()
+                            .filter(|t| t.info.workspace.contains(&handle.id()))
+                            .map(|t| t.handle.clone())
+                            .collect();
+                        for t in moving {
+                            if let Some(top) = self.toplevels.for_handle_mut(&t) {
+                                top.pending_move = Some(target.clone());
+                            }
+                            self.send_wayland_cmd(backend::Cmd::MoveToplevelToWorkspace(
+                                t,
+                                target.clone(),
+                                output.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+\\1""",
+    s, count=1)
+open(p, "w").write(s)
+if (n1, n2, n3, n4) != (1, 1, 1, 1):
+    print("workspaces close button patch failed", n1, n2, n3, n4, file=sys.stderr)
+    sys.exit(1)
+
+# --- thumbnails refresh about 10 times a second, not on every frame: capturing every window and
+# every workspace at full rate made the overview (and the pointer in it) crawl on a 4K screen.
+p = "src/backend/wayland/screencopy.rs"
+s = open(p).read()
+s, n = re.subn(
+    r"        self\.thread_pool\.spawn_ok\(async move \{\n            if let Some\(release\) = release \{\n                // Wait for buffer to be released by server\n                release\.await;\n            \}\n",
+    """        std::thread::spawn(move || {
+            if let Some(release) = release {
+                // Wait for buffer to be released by server
+                cosmic::iced::futures::executor::block_on(release);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(90));
+""",
+    s, count=1)
+if n != 1:
+    print("workspaces capture throttle patch failed", file=sys.stderr)
+    sys.exit(1)
+open(p, "w").write(s)

@@ -1,5 +1,5 @@
 diff --git a/src/backend/render/wayland/blur_effect.rs b/src/backend/render/wayland/blur_effect.rs
-index b8a7935..8e00faf 100644
+index b8a7935..038294f 100644
 --- a/src/backend/render/wayland/blur_effect.rs
 +++ b/src/backend/render/wayland/blur_effect.rs
 @@ -189,8 +189,10 @@ impl BlurElement {
@@ -14,6 +14,73 @@ index b8a7935..8e00faf 100644
              return Ok(None);
          };
  
+@@ -394,6 +396,7 @@ where
+         }) {
+             texture_entry.take();
+         }
++        let texture_is_new = texture_entry.is_none();
+         if texture_entry.is_none() {
+             let gl_texture = renderer
+                 .as_mut()
+@@ -407,10 +410,22 @@ where
+             texture_entry.as_ref().unwrap(),
+         )
+         .unwrap();
+-        let mut off_texture = renderer
+-            .as_mut()
+-            .create_buffer(Fourcc::Abgr8888, tex_size)
+-            .map_err(R::from_gles_error)?;
++        let scratch_ref = cache.get_or_insert_threadsafe(BlurScratch::default);
++        let mut scratch = scratch_ref.lock().unwrap();
++        if scratch.as_ref().is_some_and(|t| t.size() != tex_size) || texture_is_new {
++            *scratch = None;
++        }
++        let mut off_texture = match scratch.clone() {
++            Some(t) => t,
++            None => {
++                let t: GlesTexture = renderer
++                    .as_mut()
++                    .create_buffer(Fourcc::Abgr8888, tex_size)
++                    .map_err(R::from_gles_error)?;
++                *scratch = Some(t.clone());
++                t
++            }
++        };
+         std::mem::drop(renderer);
+ 
+         let sync = blit_from_active_fb(gles_frame, src, dst, transform, &mut texture)
+@@ -480,6 +495,9 @@ where
+     }
+ }
+ 
++/// The second texture the blur passes ping-pong with, kept per blurred surface.
++type BlurScratch = std::sync::Mutex<Option<GlesTexture>>;
++
+ fn blit_from_active_fb(
+     frame: &mut GlesFrame<'_, '_>,
+     src: Rectangle<f64, Buffer>,
+@@ -629,9 +647,8 @@ fn render_blur(
+             gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::REPEAT as i32);
+             gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::REPEAT as i32);
+         })?;
+-        let sync = frame.finish()?;
++        let _sync = frame.finish()?;
+         std::mem::drop(fb);
+-        renderer.wait(&sync)?;
+ 
+         textures.swap(0, 1);
+     }
+@@ -692,9 +709,8 @@ fn render_blur(
+             gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::REPEAT as i32);
+             gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::REPEAT as i32);
+         })?;
+-        let sync = frame.finish()?;
++        let _sync = frame.finish()?;
+         std::mem::drop(fb);
+-        renderer.wait(&sync)?;
+ 
+         textures.swap(0, 1);
+     }
 diff --git a/src/input/actions.rs b/src/input/actions.rs
 index 8639ba6..769fb8a 100644
 --- a/src/input/actions.rs

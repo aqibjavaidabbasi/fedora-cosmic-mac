@@ -333,3 +333,47 @@ if n3 != 1:
     print("compositor title bar patch failed", file=sys.stderr)
     sys.exit(1)
 open(p, "w").write(s)
+
+# ---------------------------------------------------------------------------
+# Smoother blur: the scratch texture used while blurring is kept between frames instead of
+# being allocated (at the size of the blurred area, up to a whole 4K screen) and freed on
+# every frame for every blurred surface, and the passes no longer wait on the GPU in between
+# (everything runs in one GL context, so the commands are already ordered).
+p = "src/backend/render/wayland/blur_effect.rs"
+s = open(p).read()
+s, b1 = re.subn(
+    r"        let mut off_texture = renderer\n            \.as_mut\(\)\n            \.create_buffer\(Fourcc::Abgr8888, tex_size\)\n            \.map_err\(R::from_gles_error\)\?;\n",
+    """        let scratch_ref = cache.get_or_insert_threadsafe(BlurScratch::default);
+        let mut scratch = scratch_ref.lock().unwrap();
+        if scratch.as_ref().is_some_and(|t| t.size() != tex_size) || texture_is_new {
+            *scratch = None;
+        }
+        let mut off_texture = match scratch.clone() {
+            Some(t) => t,
+            None => {
+                let t: GlesTexture = renderer
+                    .as_mut()
+                    .create_buffer(Fourcc::Abgr8888, tex_size)
+                    .map_err(R::from_gles_error)?;
+                *scratch = Some(t.clone());
+                t
+            }
+        };
+""", s, count=1)
+s, b2 = re.subn(
+    r"        if texture_entry\.is_none\(\) \{\n            let gl_texture = renderer",
+    "        let texture_is_new = texture_entry.is_none();\n        if texture_entry.is_none() {\n            let gl_texture = renderer",
+    s, count=1)
+s, b3 = re.subn(
+    r"(\nfn blit_from_active_fb\()",
+    """
+/// The second texture the blur passes ping-pong with, kept per blurred surface.
+type BlurScratch = std::sync::Mutex<Option<GlesTexture>>;
+\\1""", s, count=1)
+s, b4 = re.subn(
+    r"        let sync = frame\.finish\(\)\?;\n        std::mem::drop\(fb\);\n        renderer\.wait\(&sync\)\?;\n",
+    "        let _sync = frame.finish()?;\n        std::mem::drop(fb);\n", s)
+if (b1, b2, b3) != (1, 1, 1) or b4 != 2:
+    print("blur speed-up patch failed", (b1, b2, b3, b4), file=sys.stderr)
+    sys.exit(1)
+open(p, "w").write(s)
