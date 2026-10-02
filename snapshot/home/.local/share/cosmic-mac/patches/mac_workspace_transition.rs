@@ -148,6 +148,14 @@ pub struct View {
 ///   `previous` (so it grows from 0 to 1 as `previous` leaves).
 ///
 /// With no secondary workspace only `current` is drawn.
+///
+/// `direction` is the way the position is moving (see [`Transition::direction`]: positive toward
+/// a higher index, negative toward a lower one, 0 when it is not moving). It matters when the
+/// position is exactly on a workspace *while a switch is running*, which is the very first frame
+/// of every switch: instead of reporting "only workspace N", the pair is drawn in the direction
+/// of motion (`N` and its neighbour in that direction, at fraction 0 or 1). Rendering and
+/// pointer hit-testing both go through this function, so they always agree on which workspace is
+/// primary from the first frame of a transition.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PairView {
     pub current: usize,
@@ -161,15 +169,23 @@ pub struct PreviousView {
     pub percentage: f32,
 }
 
-pub fn pair_view(view: &View, active: usize) -> PairView {
-    let Some(hi) = view.secondary else {
-        return PairView {
-            current: view.primary,
-            previous: None,
-        };
+pub fn pair_view(view: &View, active: usize, last: usize, direction: i32) -> PairView {
+    // exactly on a workspace while moving: use the pair in the direction of motion
+    let (lo, hi, fraction) = match view.secondary {
+        Some(hi) => (view.primary, hi, view.fraction),
+        None if view.edge == 0.0 && direction > 0 && view.primary < last => {
+            (view.primary, view.primary + 1, 0.0)
+        }
+        None if view.edge == 0.0 && direction < 0 && view.primary > 0 => {
+            (view.primary - 1, view.primary, 1.0)
+        }
+        None => {
+            return PairView {
+                current: view.primary,
+                previous: None,
+            };
+        }
     };
-    let lo = view.primary;
-    let fraction = view.fraction;
     if active == lo {
         // `lo` is the logical active workspace and `hi` is leaving: it moves out to the right
         PairView {
@@ -333,6 +349,25 @@ impl Transition {
                 now.saturating_duration_since(start) < curve.duration()
             }
             _ => false,
+        }
+    }
+
+    /// Which way the position is moving at `now`: 1 toward a higher index, -1 toward a lower
+    /// one, 0 when idle, tracking, arrived or exactly at its target. Based on the target of the
+    /// running animation, so it is correct even on the first frame (velocity still zero).
+    pub fn direction(&self, now: Instant) -> i32 {
+        match self.mode {
+            Mode::Animating { target, .. } => {
+                let delta = target as f64 - self.position(now);
+                if delta > SNAP_EPSILON {
+                    1
+                } else if delta < -SNAP_EPSILON {
+                    -1
+                } else {
+                    0
+                }
+            }
+            _ => 0,
         }
     }
 
@@ -1531,6 +1566,10 @@ mod tests {
     // =========================================================================================
 
     fn pair_at(position: f64, active: usize, count: usize) -> PairView {
+        pair_moving(position, active, count, 0)
+    }
+
+    fn pair_moving(position: f64, active: usize, count: usize, direction: i32) -> PairView {
         let now = t0();
         let mut t = Transition::new(0);
         t.begin_tracking(now, 0);
@@ -1539,7 +1578,7 @@ mod tests {
             limit: 100.0,
         };
         t.track(position, 0.0, count.max(1) - 1, &wide);
-        pair_view(&t.view(now, count), active)
+        pair_view(&t.view(now, count), active, count.max(1) - 1, direction)
     }
 
     #[test]
@@ -1630,18 +1669,113 @@ mod tests {
         let now = t0();
         let mut t = Transition::new(1);
         t.retarget_timed(now, 2, Duration::from_millis(200));
-        let start = pair_view(&t.view(now, 4), 2);
-        // exactly at the start the position is on workspace 1: only one workspace to draw...
-        assert_eq!(start.current, 1);
-        assert_eq!(start.previous, None);
-        // ...and a moment later it is the old pair, percentage still small
-        let early = pair_view(&t.view(after(now, 10), 4), 2);
+        let draw = |ms: u64| {
+            let at = after(now, ms);
+            pair_view(&t.view(at, 4), 2, 3, t.direction(at))
+        };
+        // FIRST FRAME (position exactly on workspace 1): already previous 1 / current 2
+        let start = draw(0);
+        assert_eq!(start.current, 2, "current must be the workspace being entered from frame 0");
+        let prev = start.previous.expect("previous must be drawn from frame 0");
+        assert_eq!((prev.idx, prev.forward), (1, true));
+        assert_eq!(prev.percentage, 0.0);
+        // a moment later: same pair, percentage small
+        let early = draw(10);
         assert_eq!(early.current, 2);
         let prev = early.previous.unwrap();
         assert_eq!((prev.idx, prev.forward), (1, true));
         assert!(prev.percentage > 0.0 && prev.percentage < 0.05);
         // at the end only the new workspace remains
-        let end = pair_view(&t.view(after(now, 250), 4), 2);
-        assert_eq!(end, PairView { current: 2, previous: None });
+        assert_eq!(draw(250), PairView { current: 2, previous: None });
+    }
+
+    #[test]
+    fn first_frame_pair_is_the_same_whichever_way_the_switch_goes() {
+        let now = t0();
+        // downward: 2 -> 1, the old model had previous 2 (leaving to the right), current 1
+        let mut t = Transition::new(2);
+        t.retarget_timed(now, 1, Duration::from_millis(200));
+        let first = pair_view(&t.view(now, 4), 1, 3, t.direction(now));
+        assert_eq!(first.current, 1);
+        let prev = first.previous.unwrap();
+        assert_eq!((prev.idx, prev.forward), (2, false));
+        assert_eq!(prev.percentage, 0.0);
+        // and it continues with the same pair
+        let later = after(now, 40);
+        let next = pair_view(&t.view(later, 4), 1, 3, t.direction(later));
+        assert_eq!(next.current, 1);
+        assert_eq!(next.previous.unwrap().idx, 2);
+    }
+
+    #[test]
+    fn first_frame_pair_for_a_non_adjacent_switch_uses_the_pair_in_the_direction_of_motion() {
+        let now = t0();
+        let mut t = Transition::new(0);
+        t.retarget_timed(now, 3, Duration::from_millis(200));
+        // first frame: on workspace 0, moving up: pair (0, 1); active (3) is in neither so the
+        // higher one of the pair is current, exactly like every later frame of this segment
+        let first = pair_view(&t.view(now, 4), 3, 3, t.direction(now));
+        assert_eq!(first.current, 1);
+        assert_eq!(first.previous.unwrap().idx, 0);
+        let second = pair_view(&t.view(after(now, 5), 4), 3, 3, t.direction(after(now, 5)));
+        assert_eq!(second.current, first.current, "no change of primary between frame 0 and frame 1");
+        assert_eq!(second.previous.unwrap().idx, 0);
+    }
+
+    #[test]
+    fn rendering_and_hit_testing_use_the_same_pair_on_every_frame_of_a_switch() {
+        // both go through pair_view with the same inputs; check no frame has a different primary
+        // than the frames around it, for all directions and distances
+        for (from, to) in [(0usize, 1usize), (1, 0), (1, 2), (3, 2), (0, 3), (3, 0), (1, 3), (2, 0)] {
+            let now = t0();
+            let mut t = Transition::new(from);
+            t.retarget_timed(now, to, Duration::from_millis(200));
+            for ms in 0..=200u64 {
+                let at = after(now, ms);
+                let pair = pair_view(&t.view(at, 4), to, 3, t.direction(at));
+                if let Some(prev) = pair.previous {
+                    assert_eq!((prev.idx as i64 - pair.current as i64).abs(), 1, "{from}->{to} at {ms} ms");
+                }
+            }
+            // the very first frame must already be a pair (the old workspace is leaving)
+            let first = pair_view(&t.view(now, 4), to, 3, t.direction(now));
+            assert!(first.previous.is_some(), "{from}->{to}: first frame has no previous");
+        }
+    }
+
+    #[test]
+    fn direction_is_zero_when_idle_tracking_or_arrived() {
+        let now = t0();
+        let mut t = Transition::new(1);
+        assert_eq!(t.direction(now), 0);
+        t.begin_tracking(now, 1);
+        assert_eq!(t.direction(now), 0);
+        t.retarget_timed(now, 3, Duration::from_millis(200));
+        assert_eq!(t.direction(now), 1);
+        assert_eq!(t.direction(after(now, 100)), 1);
+        assert_eq!(t.direction(after(now, 300)), 0);
+        t.snap(2);
+        t.retarget_timed(after(now, 400), 0, Duration::from_millis(200));
+        assert_eq!(t.direction(after(now, 400)), -1);
+    }
+
+    #[test]
+    fn pair_view_without_motion_on_a_workspace_is_unchanged() {
+        // not switching: only the one workspace, even at the first or last index
+        for (pos, active) in [(0.0, 0usize), (2.0, 2), (3.0, 3)] {
+            assert_eq!(pair_at(pos, active, 4), PairView { current: active, previous: None });
+        }
+    }
+
+    #[test]
+    fn first_frame_pair_is_clamped_at_the_ends() {
+        // moving up from the last workspace or down from the first cannot happen, but must not panic
+        let now = t0();
+        let t = Transition::new(3);
+        let v = t.view(now, 4);
+        assert_eq!(pair_view(&v, 3, 3, 1), PairView { current: 3, previous: None });
+        let t = Transition::new(0);
+        let v = t.view(now, 4);
+        assert_eq!(pair_view(&v, 0, 3, -1), PairView { current: 0, previous: None });
     }
 }

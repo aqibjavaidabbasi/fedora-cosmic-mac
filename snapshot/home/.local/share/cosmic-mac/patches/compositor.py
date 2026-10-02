@@ -539,7 +539,12 @@ replace_exact(SH,
             return (None, current);
         }
         let view = self.transition.view(now, self.workspaces.len());
-        let pair = workspace_transition::pair_view(&view, self.active);
+        let pair = workspace_transition::pair_view(
+            &view,
+            self.active,
+            self.workspaces.len().saturating_sub(1),
+            self.transition.direction(now),
+        );
         let Some(current) = self.workspaces.get(pair.current).map(|w| (w.handle, pair.current))
         else {
             return (None, (self.workspaces[self.active].handle, self.active));
