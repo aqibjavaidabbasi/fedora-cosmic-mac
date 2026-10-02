@@ -44,6 +44,46 @@ index 72b4390..45388f6 100644
      // Based on libadwaita (LGPL-2.1-or-later):
      // https://gitlab.gnome.org/GNOME/libadwaita/-/blob/1.4.4/src/adw-spring-animation.c,
      // which itself is based on (MIT):
+diff --git a/src/backend/render/mod.rs b/src/backend/render/mod.rs
+index 9ad6158..848ebf9 100644
+--- a/src/backend/render/mod.rs
++++ b/src/backend/render/mod.rs
+@@ -668,19 +668,13 @@ where
+     };
+ 
+     let shell_guard = shell.read();
+-    let Some((previous_workspace, workspace)) = shell_guard.workspaces.active(output) else {
++    let Some((previous_workspace, workspace)) = shell_guard.workspaces.render_pair(output) else {
+         #[cfg(not(feature = "debug"))]
+         return Ok(Vec::new());
+         #[cfg(feature = "debug")]
+         return Ok(debug_elements);
+     };
+ 
+-    let (previous_idx, idx) = shell_guard.workspaces.active_num(output);
+-    let previous_workspace = previous_workspace
+-        .zip(previous_idx)
+-        .map(|((w, start), idx)| (w.handle, idx, start));
+-    let workspace = (workspace.handle, idx);
+-
+     std::mem::drop(shell_guard);
+ 
+     let element_filter = if workspace_overview_is_open(output) {
+@@ -1263,13 +1257,8 @@ where
+     let shell_ref = shell.read();
+     let (previous_workspace, workspace) = shell_ref
+         .workspaces
+-        .active(output)
++        .render_pair(output)
+         .ok_or(RenderError::OutputNoMode(OutputNoMode))?;
+-    let (previous_idx, idx) = shell_ref.workspaces.active_num(output);
+-    let previous_workspace = previous_workspace
+-        .zip(previous_idx)
+-        .map(|((w, start), idx)| (w.handle, idx, start));
+-    let workspace = (workspace.handle, idx);
+     let zoom_state = shell_ref.zoom_state().cloned();
+     std::mem::drop(shell_ref);
+ 
 diff --git a/src/backend/render/wayland/blur_effect.rs b/src/backend/render/wayland/blur_effect.rs
 index b8a7935..038294f 100644
 --- a/src/backend/render/wayland/blur_effect.rs
@@ -167,7 +207,7 @@ index 6c9c2f3..b0f57ac 100644
  
  #[derive(Debug, Clone)]
 diff --git a/src/input/mod.rs b/src/input/mod.rs
-index 45586b0..7293b01 100644
+index 45586b0..c8e8922 100644
 --- a/src/input/mod.rs
 +++ b/src/input/mod.rs
 @@ -1193,8 +1193,7 @@ impl State {
@@ -189,6 +229,34 @@ index 45586b0..7293b01 100644
                                              _ => None, // TODO: Other actions
                                          }
                                      } else {
+@@ -2741,12 +2742,7 @@ impl State {
+         shell: &Shell,
+         seat: &Seat<State>,
+     ) -> Option<KeyboardFocusTarget> {
+-        let (previous_workspace, workspace) = shell.workspaces.active(output)?;
+-        let (previous_idx, idx) = shell.workspaces.active_num(output);
+-        let previous_workspace = previous_workspace
+-            .zip(previous_idx)
+-            .map(|((w, start), idx)| (w.handle, idx, start));
+-        let workspace = (workspace.handle, idx);
++        let (previous_workspace, workspace) = shell.workspaces.render_pair(output)?;
+         let element_filter = if workspace_overview_is_open(output) {
+             ElementFilter::LayerShellOnly
+         } else {
+@@ -2869,12 +2865,7 @@ impl State {
+         output: &Output,
+         shell: &Shell,
+     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+-        let (previous_workspace, workspace) = shell.workspaces.active(output)?;
+-        let (previous_idx, idx) = shell.workspaces.active_num(output);
+-        let previous_workspace = previous_workspace
+-            .zip(previous_idx)
+-            .map(|((w, start), idx)| (w.handle, idx, start));
+-        let workspace = (workspace.handle, idx);
++        let (previous_workspace, workspace) = shell.workspaces.render_pair(output)?;
+ 
+         let element_filter = if workspace_overview_is_open(output) {
+             ElementFilter::LayerShellOnly
 diff --git a/src/shell/element/surface.rs b/src/shell/element/surface.rs
 index a7fd922..6479d12 100644
 --- a/src/shell/element/surface.rs
@@ -309,7 +377,7 @@ index fa4a187..7d33adc 100644
  }
  
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 47d7885..21ae214 100644
+index 47d7885..4b1d336 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
 @@ -96,6 +96,7 @@ use crate::{
@@ -350,16 +418,124 @@ index 47d7885..21ae214 100644
          WorkspaceDelta::GestureEnd {
              start: Instant::now(),
              forward,
-@@ -570,7 +583,7 @@ impl WorkspaceSet {
+@@ -365,7 +378,10 @@ impl WorkspaceDelta {
+ 
+ #[derive(Debug)]
+ pub struct WorkspaceSet {
++    /// The live swipe's animation pair (unchanged by Stage A2).
+     previously_active: Option<(usize, WorkspaceDelta)>,
++    /// Retargetable transition used for every other kind of workspace switch.
++    transition: workspace_transition::Transition,
+     pub active: usize,
+     pub group: WorkspaceGroupHandle,
+     tiling_enabled: bool,
+@@ -501,6 +517,7 @@ impl WorkspaceSet {
+ 
+         WorkspaceSet {
+             previously_active: None,
++            transition: workspace_transition::Transition::new(0),
+             active: 0,
+             group: group_handle,
+             tiling_enabled,
+@@ -535,11 +552,28 @@ impl WorkspaceSet {
+             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Urgent);
+             state.remove_workspace_state(&self.workspaces[idx].handle, WState::Urgent);
+             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
+-            self.previously_active = if animate {
+-                Some((old_active, workspace_delta))
+-            } else {
+-                None
+-            };
++            let now = Instant::now();
++            if self.transition.is_idle() {
++                // at rest the transition sits on the workspace we are leaving (indices may have
++                // changed since it last moved)
++                self.transition.snap(old_active);
++            }
++            self.previously_active = None;
++            match workspace_delta {
++                // everything except the live swipe: retarget from the current visual state
++                WorkspaceDelta::Shortcut(_) if animate => {
++                    self.transition.retarget_timed(now, idx, ANIMATION_DURATION)
++                }
++                // the live swipe keeps its own pair model for now
++                WorkspaceDelta::Gesture { .. } | WorkspaceDelta::GestureEnd { .. } => {
++                    self.transition.snap(idx);
++                    if animate {
++                        self.previously_active = Some((old_active, workspace_delta));
++                    }
++                }
++                // no animation (the overview is open)
++                WorkspaceDelta::Shortcut(_) => self.transition.snap(idx),
++            }
+             self.active = idx;
+             Ok(true)
+         } else {
+@@ -569,8 +603,49 @@ impl WorkspaceSet {
+         Err(InvalidWorkspaceIndex)
      }
  
++    /// What to draw and hit-test now: the workspace shown as "current" and, while switching,
++    /// the one leaving (`previous`), as `(handle, index, delta)`. The live swipe's pair wins when
++    /// there is one; otherwise it comes from the transition.
++    fn render_pair(
++        &self,
++        now: Instant,
++    ) -> (
++        Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
++        (WorkspaceHandle, usize),
++    ) {
++        let current = (self.workspaces[self.active].handle, self.active);
++        if let Some((idx, delta)) = self.previously_active {
++            return (
++                self.workspaces.get(idx).map(|previous| (previous.handle, idx, delta)),
++                current,
++            );
++        }
++        if self.transition.is_idle() {
++            return (None, current);
++        }
++        let view = self.transition.view(now, self.workspaces.len());
++        let pair = workspace_transition::pair_view(&view, self.active);
++        let Some(current) = self.workspaces.get(pair.current).map(|w| (w.handle, pair.current))
++        else {
++            return (None, (self.workspaces[self.active].handle, self.active));
++        };
++        let previous = pair.previous.and_then(|previous| {
++            self.workspaces.get(previous.idx).map(|w| {
++                (
++                    w.handle,
++                    previous.idx,
++                    WorkspaceDelta::Gesture {
++                        percentage: previous.percentage as f64,
++                        forward: previous.forward,
++                    },
++                )
++            })
++        });
++        (previous, current)
++    }
++
      fn update_workspace_delta(&mut self, delta: f64, forward: bool) {
 -        let easing = delta.clamp(0.0, GESTURE_MAX_LENGTH).abs() / GESTURE_MAX_LENGTH;
 +        let easing = delta.clamp(0.0, *GESTURE_MAX_LENGTH_CFG).abs() / *GESTURE_MAX_LENGTH_CFG;
          if let Some((idx, _)) = self.previously_active {
              self.previously_active = Some((
                  idx,
-@@ -644,6 +657,10 @@ impl WorkspaceSet {
+@@ -614,7 +689,11 @@ impl WorkspaceSet {
+                 _ => {}
+             }
+         } else {
+-            self.workspaces[self.active].refresh();
++            self.transition.refresh(Instant::now());
++            // like before, the active workspace is only refreshed while nothing is animating
++            if self.transition.is_idle() {
++                self.workspaces[self.active].refresh();
++            }
+         }
+         self.sticky_layer.refresh();
+     }
+@@ -644,6 +723,10 @@ impl WorkspaceSet {
          state: &mut WorkspaceUpdateGuard<State>,
          xdg_activation_state: &XdgActivationState,
      ) {
@@ -370,7 +546,7 @@ index 47d7885..21ae214 100644
          // add empty at the end, if necessary
          if self
              .workspaces
-@@ -693,6 +710,47 @@ impl WorkspaceSet {
+@@ -693,6 +776,47 @@ impl WorkspaceSet {
          }
      }
  
@@ -418,7 +594,30 @@ index 47d7885..21ae214 100644
      fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
          for (i, workspace) in self.workspaces.iter().enumerate() {
              workspace_set_idx(
-@@ -1800,6 +1858,21 @@ impl Shell {
+@@ -1354,6 +1478,22 @@ impl Workspaces {
+             })
+     }
+ 
++    /// The pair to render and hit-test for `output`: `(previous, current)` as handles and
++    /// indices. Use this instead of combining `active()` and `active_num()`, whose first
++    /// element only knows the live swipe's pair.
++    pub fn render_pair(
++        &self,
++        output: &Output,
++    ) -> Option<(
++        Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
++        (WorkspaceHandle, usize),
++    )> {
++        self.sets
++            .get(output)
++            .or(self.backup_set.as_ref())
++            .map(|set| set.render_pair(Instant::now()))
++    }
++
+     pub fn active_mut(&mut self, output: &Output) -> Option<&mut Workspace> {
+         self.sets
+             .get_mut(output)
+@@ -1800,6 +1940,21 @@ impl Shell {
          }
      }
  
@@ -440,7 +639,15 @@ index 47d7885..21ae214 100644
      pub fn end_workspace_swipe(
          &mut self,
          output: &Output,
-@@ -3434,13 +3507,24 @@ impl Shell {
+@@ -2297,6 +2452,7 @@ impl Shell {
+             set.previously_active
+                 .as_ref()
+                 .is_some_and(|(_, delta)| delta.is_animating())
++                || set.transition.is_animating(Instant::now())
+                 || set.sticky_layer.animations_going()
+         }) || !matches!(
+             self.overview_mode,
+@@ -3434,13 +3590,24 @@ impl Shell {
                      self.theme.clone(),
                      self.appearance_conf,
                  ));

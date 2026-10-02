@@ -138,6 +138,61 @@ pub struct View {
     pub edge: f32,
 }
 
+/// The renderer and the pointer hit-testing draw "previous + current" with a direction and a
+/// percentage (how far `previous` has moved out of its place). This maps a [`View`] onto that
+/// existing model without changing it:
+///
+/// - `current` is the logical active workspace whenever it is one of the two drawn workspaces
+///   (otherwise the higher one), `previous` is the other one;
+/// - `forward` is `previous < current`, `percentage` the distance of the position from
+///   `previous` (so it grows from 0 to 1 as `previous` leaves).
+///
+/// With no secondary workspace only `current` is drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PairView {
+    pub current: usize,
+    pub previous: Option<PreviousView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PreviousView {
+    pub idx: usize,
+    pub forward: bool,
+    pub percentage: f32,
+}
+
+pub fn pair_view(view: &View, active: usize) -> PairView {
+    let Some(hi) = view.secondary else {
+        return PairView {
+            current: view.primary,
+            previous: None,
+        };
+    };
+    let lo = view.primary;
+    let fraction = view.fraction;
+    if active == lo {
+        // `lo` is the logical active workspace and `hi` is leaving: it moves out to the right
+        PairView {
+            current: lo,
+            previous: Some(PreviousView {
+                idx: hi,
+                forward: false,
+                percentage: 1.0 - fraction,
+            }),
+        }
+    } else {
+        // `hi` is the active workspace, or neither is (then the higher one is treated as current)
+        PairView {
+            current: hi,
+            previous: Some(PreviousView {
+                idx: lo,
+                forward: true,
+                percentage: fraction,
+            }),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // curves
 // ---------------------------------------------------------------------------------------------
@@ -1469,5 +1524,124 @@ mod tests {
         assert!(near(sim.t.position(now), 0.5, EPS));
         sim.finish(now, -1.0);
         assert_eq!(sim.active, 0);
+    }
+
+    // =========================================================================================
+    // mapping a view onto the renderer's previous + current model
+    // =========================================================================================
+
+    fn pair_at(position: f64, active: usize, count: usize) -> PairView {
+        let now = t0();
+        let mut t = Transition::new(0);
+        t.begin_tracking(now, 0);
+        let wide = RubberBand {
+            stiffness: 1.0,
+            limit: 100.0,
+        };
+        t.track(position, 0.0, count.max(1) - 1, &wide);
+        pair_view(&t.view(now, count), active)
+    }
+
+    #[test]
+    fn pair_forward_swipe_matches_the_old_pair_model() {
+        // 1 -> 2 at 30%: the old model had previous 1, current 2 (already active), forward
+        let p = pair_at(1.3, 2, 4);
+        assert_eq!(p.current, 2);
+        let prev = p.previous.unwrap();
+        assert_eq!((prev.idx, prev.forward), (1, true));
+        assert!((prev.percentage - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pair_backward_swipe_matches_the_old_pair_model() {
+        // 3 -> 2 at 30%: previous 3 (leaving to the right), current 2, not forward
+        let p = pair_at(2.7, 2, 4);
+        assert_eq!(p.current, 2);
+        let prev = p.previous.unwrap();
+        assert_eq!((prev.idx, prev.forward), (3, false));
+        assert!((prev.percentage - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pair_cancelled_forward_swipe_matches_the_old_pair_model() {
+        // swiped 1 -> 2, cancelled: active is 1 again and the visual position is 1.3 going back
+        let p = pair_at(1.3, 1, 4);
+        assert_eq!(p.current, 1);
+        let prev = p.previous.unwrap();
+        assert_eq!((prev.idx, prev.forward), (2, false));
+        assert!((prev.percentage - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pair_percentage_runs_from_zero_to_one_as_previous_leaves() {
+        // timed switch 1 -> 2: previous is 1, percentage grows with the position
+        let mut last = -1.0f32;
+        for step in 1..100 {
+            let pos = 1.0 + step as f64 / 100.0;
+            let p = pair_at(pos, 2, 4);
+            let prev = p.previous.unwrap();
+            assert!(prev.percentage > last);
+            last = prev.percentage;
+        }
+        assert!(last > 0.98);
+    }
+
+    #[test]
+    fn pair_without_secondary_has_no_previous() {
+        for (pos, active) in [(0.0, 0usize), (2.0, 2), (3.0, 3)] {
+            let p = pair_at(pos, active, 4);
+            assert_eq!(p, PairView { current: active, previous: None });
+        }
+    }
+
+    #[test]
+    fn pair_when_active_is_not_in_the_drawn_pair_treats_the_higher_as_current() {
+        // retargeted mid-flight: drawing 1 and 2 while the logical active workspace is 3
+        let p = pair_at(1.4, 3, 4);
+        assert_eq!(p.current, 2);
+        let prev = p.previous.unwrap();
+        assert_eq!((prev.idx, prev.forward), (1, true));
+        assert!((prev.percentage - 0.4).abs() < 1e-6);
+        // and when it is below the pair
+        let p = pair_at(2.6, 0, 4);
+        assert_eq!(p.current, 3);
+        assert_eq!(p.previous.unwrap().idx, 2);
+    }
+
+    #[test]
+    fn pair_is_always_two_adjacent_workspaces() {
+        let mut pos = 0.0;
+        while pos <= 3.0 {
+            for active in 0..4 {
+                let p = pair_at(pos, active, 4);
+                if let Some(prev) = p.previous {
+                    assert_eq!((prev.idx as i64 - p.current as i64).abs(), 1, "pos {pos} active {active}");
+                    assert!(prev.percentage > 0.0 && prev.percentage < 1.0);
+                    assert_eq!(prev.forward, prev.idx < p.current);
+                }
+            }
+            pos += 0.0173;
+        }
+    }
+
+    #[test]
+    fn a_timed_shortcut_switch_drawn_through_the_pair_model_starts_and_ends_like_the_old_one() {
+        // old model: previous = old workspace, current = new one, percentage 0 -> 1
+        let now = t0();
+        let mut t = Transition::new(1);
+        t.retarget_timed(now, 2, Duration::from_millis(200));
+        let start = pair_view(&t.view(now, 4), 2);
+        // exactly at the start the position is on workspace 1: only one workspace to draw...
+        assert_eq!(start.current, 1);
+        assert_eq!(start.previous, None);
+        // ...and a moment later it is the old pair, percentage still small
+        let early = pair_view(&t.view(after(now, 10), 4), 2);
+        assert_eq!(early.current, 2);
+        let prev = early.previous.unwrap();
+        assert_eq!((prev.idx, prev.forward), (1, true));
+        assert!(prev.percentage > 0.0 && prev.percentage < 0.05);
+        // at the end only the new workspace remains
+        let end = pair_view(&t.view(after(now, 250), 4), 2);
+        assert_eq!(end, PairView { current: 2, previous: None });
     }
 }

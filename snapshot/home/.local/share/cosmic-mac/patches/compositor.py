@@ -434,3 +434,200 @@ patch("src/backend/render/animations/spring.rs", [
     }
 """),
 ])
+
+# ---------------------------------------------------------------------------
+# Stage A2: the shell uses the retargetable `Transition` for shortcut / protocol / activation
+# switching (a new request starts from the current visual position and velocity instead of
+# replacing the running animation and jumping). The live three/four-finger SWIPE path is left
+# exactly as it was: it keeps using `previously_active` and its own pair model. Rendering and
+# pointer hit-testing take the pair to draw from `Workspaces::render_pair`.
+def replace_exact(path, old, new, count=1):
+    s = open(path).read()
+    if s.count(old) != count:
+        print(f"A2 patch failed in {path}: {old[:70]!r} found {s.count(old)}x", file=sys.stderr)
+        sys.exit(1)
+    open(path, "w").write(s.replace(old, new))
+
+SH = "src/shell/mod.rs"
+replace_exact(SH,
+    "pub struct WorkspaceSet {\n    previously_active: Option<(usize, WorkspaceDelta)>,\n",
+    "pub struct WorkspaceSet {\n    /// The live swipe's animation pair (unchanged by Stage A2).\n    previously_active: Option<(usize, WorkspaceDelta)>,\n"
+    "    /// Retargetable transition used for every other kind of workspace switch.\n    transition: workspace_transition::Transition,\n")
+replace_exact(SH,
+    "        WorkspaceSet {\n            previously_active: None,\n            active: 0,\n",
+    "        WorkspaceSet {\n            previously_active: None,\n            transition: workspace_transition::Transition::new(0),\n            active: 0,\n")
+replace_exact(SH,
+    """            self.previously_active = if animate {
+                Some((old_active, workspace_delta))
+            } else {
+                None
+            };
+            self.active = idx;
+""",
+    """            let now = Instant::now();
+            if self.transition.is_idle() {
+                // at rest the transition sits on the workspace we are leaving (indices may have
+                // changed since it last moved)
+                self.transition.snap(old_active);
+            }
+            self.previously_active = None;
+            match workspace_delta {
+                // everything except the live swipe: retarget from the current visual state
+                WorkspaceDelta::Shortcut(_) if animate => {
+                    self.transition.retarget_timed(now, idx, ANIMATION_DURATION)
+                }
+                // the live swipe keeps its own pair model for now
+                WorkspaceDelta::Gesture { .. } | WorkspaceDelta::GestureEnd { .. } => {
+                    self.transition.snap(idx);
+                    if animate {
+                        self.previously_active = Some((old_active, workspace_delta));
+                    }
+                }
+                // no animation (the overview is open)
+                WorkspaceDelta::Shortcut(_) => self.transition.snap(idx),
+            }
+            self.active = idx;
+""")
+replace_exact(SH,
+    """        } else {
+            self.workspaces[self.active].refresh();
+        }
+        self.sticky_layer.refresh();
+""",
+    """        } else {
+            self.transition.refresh(Instant::now());
+            // like before, the active workspace is only refreshed while nothing is animating
+            if self.transition.is_idle() {
+                self.workspaces[self.active].refresh();
+            }
+        }
+        self.sticky_layer.refresh();
+""")
+replace_exact(SH,
+    """            set.previously_active
+                .as_ref()
+                .is_some_and(|(_, delta)| delta.is_animating())
+                || set.sticky_layer.animations_going()
+""",
+    """            set.previously_active
+                .as_ref()
+                .is_some_and(|(_, delta)| delta.is_animating())
+                || set.transition.is_animating(Instant::now())
+                || set.sticky_layer.animations_going()
+""")
+# the pair to draw, per set and per Workspaces
+replace_exact(SH,
+    "    fn update_workspace_delta(&mut self, delta: f64, forward: bool) {\n",
+    """    /// What to draw and hit-test now: the workspace shown as "current" and, while switching,
+    /// the one leaving (`previous`), as `(handle, index, delta)`. The live swipe's pair wins when
+    /// there is one; otherwise it comes from the transition.
+    fn render_pair(
+        &self,
+        now: Instant,
+    ) -> (
+        Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
+        (WorkspaceHandle, usize),
+    ) {
+        let current = (self.workspaces[self.active].handle, self.active);
+        if let Some((idx, delta)) = self.previously_active {
+            return (
+                self.workspaces.get(idx).map(|previous| (previous.handle, idx, delta)),
+                current,
+            );
+        }
+        if self.transition.is_idle() {
+            return (None, current);
+        }
+        let view = self.transition.view(now, self.workspaces.len());
+        let pair = workspace_transition::pair_view(&view, self.active);
+        let Some(current) = self.workspaces.get(pair.current).map(|w| (w.handle, pair.current))
+        else {
+            return (None, (self.workspaces[self.active].handle, self.active));
+        };
+        let previous = pair.previous.and_then(|previous| {
+            self.workspaces.get(previous.idx).map(|w| {
+                (
+                    w.handle,
+                    previous.idx,
+                    WorkspaceDelta::Gesture {
+                        percentage: previous.percentage as f64,
+                        forward: previous.forward,
+                    },
+                )
+            })
+        });
+        (previous, current)
+    }
+
+    fn update_workspace_delta(&mut self, delta: f64, forward: bool) {
+""")
+replace_exact(SH,
+    "    pub fn active_mut(&mut self, output: &Output) -> Option<&mut Workspace> {\n",
+    """    /// The pair to render and hit-test for `output`: `(previous, current)` as handles and
+    /// indices. Use this instead of combining `active()` and `active_num()`, whose first
+    /// element only knows the live swipe's pair.
+    pub fn render_pair(
+        &self,
+        output: &Output,
+    ) -> Option<(
+        Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
+        (WorkspaceHandle, usize),
+    )> {
+        self.sets
+            .get(output)
+            .or(self.backup_set.as_ref())
+            .map(|set| set.render_pair(Instant::now()))
+    }
+
+    pub fn active_mut(&mut self, output: &Output) -> Option<&mut Workspace> {
+""")
+
+RENDER = "src/backend/render/mod.rs"
+replace_exact(RENDER,
+    """    let Some((previous_workspace, workspace)) = shell_guard.workspaces.active(output) else {
+        #[cfg(not(feature = "debug"))]
+        return Ok(Vec::new());
+        #[cfg(feature = "debug")]
+        return Ok(debug_elements);
+    };
+
+    let (previous_idx, idx) = shell_guard.workspaces.active_num(output);
+    let previous_workspace = previous_workspace
+        .zip(previous_idx)
+        .map(|((w, start), idx)| (w.handle, idx, start));
+    let workspace = (workspace.handle, idx);
+""",
+    """    let Some((previous_workspace, workspace)) = shell_guard.workspaces.render_pair(output) else {
+        #[cfg(not(feature = "debug"))]
+        return Ok(Vec::new());
+        #[cfg(feature = "debug")]
+        return Ok(debug_elements);
+    };
+""")
+replace_exact(RENDER,
+    """    let (previous_workspace, workspace) = shell_ref
+        .workspaces
+        .active(output)
+        .ok_or(RenderError::OutputNoMode(OutputNoMode))?;
+    let (previous_idx, idx) = shell_ref.workspaces.active_num(output);
+    let previous_workspace = previous_workspace
+        .zip(previous_idx)
+        .map(|((w, start), idx)| (w.handle, idx, start));
+    let workspace = (workspace.handle, idx);
+""",
+    """    let (previous_workspace, workspace) = shell_ref
+        .workspaces
+        .render_pair(output)
+        .ok_or(RenderError::OutputNoMode(OutputNoMode))?;
+""")
+INPUT = "src/input/mod.rs"
+replace_exact(INPUT,
+    """        let (previous_workspace, workspace) = shell.workspaces.active(output)?;
+        let (previous_idx, idx) = shell.workspaces.active_num(output);
+        let previous_workspace = previous_workspace
+            .zip(previous_idx)
+            .map(|((w, start), idx)| (w.handle, idx, start));
+        let workspace = (workspace.handle, idx);
+""",
+    """        let (previous_workspace, workspace) = shell.workspaces.render_pair(output)?;
+""", count=2)
