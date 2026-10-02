@@ -235,6 +235,35 @@ pub enum Action {
     OverviewHide,
 }
 
+/// A method call without arguments on the session bus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionCall {
+    pub destination: &'static str,
+    pub path: &'static str,
+    pub interface: &'static str,
+    pub method: &'static str,
+}
+
+/// The D-Bus call an overview action stands for, or `None` for every other action. These are
+/// the names `cosmic-workspaces` itself serves (`#[zbus::interface(name = "com.system76.
+/// CosmicWorkspaces")]` with `show` and `hide` at `/com/system76/CosmicWorkspaces`; zbus
+/// capitalizes method names, which `busctl --user call` confirmed on a running session).
+pub fn overview_call(action: Action) -> Option<SessionCall> {
+    const BUS: &str = "com.system76.CosmicWorkspaces";
+    const PATH: &str = "/com/system76/CosmicWorkspaces";
+    let method = match action {
+        Action::OverviewShow => "Show",
+        Action::OverviewHide => "Hide",
+        _ => return None,
+    };
+    Some(SessionCall {
+        destination: BUS,
+        path: PATH,
+        interface: BUS,
+        method,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Mode {
     /// Axis not locked yet.
@@ -1369,5 +1398,107 @@ mod tests {
         sh.release(false);
         assert_eq!(sh.active, 2);
         assert!(near(sh.settle(), 2.0, 1e-9));
+    }
+
+    // =========================================================================================
+    // A4: overview calls
+    // =========================================================================================
+
+    #[test]
+    fn show_and_hide_map_to_the_cosmic_workspaces_methods() {
+        let show = overview_call(Action::OverviewShow).unwrap();
+        let hide = overview_call(Action::OverviewHide).unwrap();
+        for call in [show, hide] {
+            assert_eq!(call.destination, "com.system76.CosmicWorkspaces");
+            assert_eq!(call.path, "/com/system76/CosmicWorkspaces");
+            assert_eq!(call.interface, "com.system76.CosmicWorkspaces");
+        }
+        assert_eq!(show.method, "Show");
+        assert_eq!(hide.method, "Hide");
+    }
+
+    #[test]
+    fn every_other_action_makes_no_d_bus_call() {
+        for action in [
+            Action::None,
+            Action::WorkspaceTrack { first: true, total: 0.3, velocity: 1.0 },
+            Action::WorkspaceTrack { first: false, total: -0.3, velocity: -1.0 },
+            Action::WorkspaceFinish { velocity: 2.0 },
+            Action::WorkspaceCancel,
+        ] {
+            assert_eq!(overview_call(action), None, "{action:?}");
+        }
+    }
+
+    #[test]
+    fn an_overview_gesture_only_ever_produces_overview_actions_or_none() {
+        // whatever the overview state does during the gesture, no workspace action appears, so
+        // nothing the D-Bus side does (or fails to do) can reach the workspace state
+        for start_open in [false, true] {
+            for dy in [-20.0f64, 20.0] {
+                let mut s = started(3);
+                for i in 1..=15u64 {
+                    // the overview flips open/closed part-way, as it would after a call
+                    let open = if i > 5 { !start_open } else { start_open };
+                    let c = Context { overview_open: open, ..ctx() };
+                    let a = upd(&mut s, 2.0, dy, i * 10, &c);
+                    assert!(
+                        matches!(a, Action::None | Action::OverviewShow | Action::OverviewHide),
+                        "start_open {start_open} dy {dy}: {a:?}"
+                    );
+                }
+                let a = end(&mut s, false, 200, &ctx());
+                assert_eq!(a, Action::None);
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_overview_call_leaves_the_gesture_and_workspaces_consistent() {
+        // The glue ignores the outcome of the D-Bus call: model a failed call as "the overview
+        // never opens". The gesture keeps going, ends cleanly, the next gesture works, and the
+        // workspace state never moved.
+        let mut sh = Shell::new(2, 4);
+        let before_active = sh.active;
+        let mut shows = 0;
+        for _ in 0..3 {
+            sh.begin(3);
+            for _ in 0..8 {
+                sh.clock += 10;
+                let action = sh.session.as_mut().unwrap().feed(
+                    Input::Update { dx: 0.0, dy: -20.0, time: ms(sh.clock) },
+                    &ctx(), // the overview stays closed: the call "failed"
+                );
+                if action == Action::OverviewShow {
+                    shows += 1;
+                    assert!(overview_call(action).is_some());
+                }
+                sh.apply(action);
+            }
+            sh.release(false);
+            sh.wait(100);
+        }
+        assert_eq!(shows, 3, "one attempt per gesture, none repeated within a gesture");
+        assert_eq!(sh.active, before_active);
+        assert!(sh.transition.is_idle());
+        assert!(near(sh.position(), before_active as f64, 1e-12));
+    }
+
+    #[test]
+    fn horizontal_swipe_while_the_overview_is_open_never_touches_the_transition() {
+        let mut sh = Shell::new(1, 4);
+        let open = Context { overview_open: true, ..ctx() };
+        sh.begin(4);
+        for _ in 0..10 {
+            sh.clock += 10;
+            let action = sh.session.as_mut().unwrap().feed(
+                Input::Update { dx: -15.0, dy: 1.0, time: ms(sh.clock) },
+                &open,
+            );
+            assert_eq!(action, Action::None);
+            sh.apply(action);
+        }
+        assert!(sh.transition.is_idle(), "no tracking may start");
+        assert_eq!(sh.active, 1);
     }
 }
