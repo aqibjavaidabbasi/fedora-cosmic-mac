@@ -1273,3 +1273,153 @@ replace_exact(SH,
     "        } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)\n"
     "            || should_be_sticky\n"
     "            || mac_popover\n")
+
+# ---------------------------------------------------------------------------
+# Stage B1 (behavior-neutral): the Mac Spaces policy as a pure module. Nothing in the running
+# compositor calls it yet, so the compositor behaves exactly as before. Unit tests live in the
+# new file (`cargo test --lib`).
+shutil.copy(os.path.join(here, "mac_spaces.rs"), "src/shell/mac_spaces.rs")
+patch("src/shell/mod.rs", [
+    (r"(pub mod workspace_transition;\n)", "\\1pub mod mac_spaces;\n"),
+])
+
+# ---------------------------------------------------------------------------
+# Stage B2: the workspace transition follows workspace identity, not index numbers. Every
+# WorkspaceSet path that removes, inserts or reorders workspaces records the handles before the
+# change and lets `Transition::remap` shift (or, if a drawn workspace is gone, re-base) the
+# transition afterwards. Appending at the end never renumbers anything and needs no remap.
+# No tuning, gesture, policy or creation behavior changes.
+replace_exact(SH,
+    "    fn post_remove_workspace(\n",
+    "    /// The handles of this set's workspaces, in order (Stage B2).\n"
+    "    fn workspace_handles(&self) -> Vec<WorkspaceHandle> {\n"
+    "        self.workspaces.iter().map(|w| w.handle).collect()\n"
+    "    }\n"
+    "\n"
+    "    /// Stage B2: the workspace list changed from `before`. Keep the transition on the same\n"
+    "    /// workspaces by handle, not on the same numbers (see `Transition::remap`). Call after\n"
+    "    /// `active` has been updated.\n"
+    "    fn remap_transition(&mut self, before: &[WorkspaceHandle]) {\n"
+    "        let after = self.workspace_handles();\n"
+    "        let map = workspace_transition::index_map(before, &after);\n"
+    "        self.transition\n"
+    "            .remap(Instant::now(), &map, after.len(), self.active);\n"
+    "    }\n"
+    "\n"
+    "    fn post_remove_workspace(\n")
+# ensure_last_empty (stock dynamic workspaces)
+replace_exact(SH,
+    "            self.mac_prune(state, xdg_activation_state);\n            return;\n        }\n",
+    "            self.mac_prune(state, xdg_activation_state);\n            return;\n        }\n"
+    "        let before = self.workspace_handles();\n")
+replace_exact(SH,
+    "            self.update_workspace_idxs(state);\n        }\n    }\n\n    fn mac_prune(",
+    "            self.update_workspace_idxs(state);\n        }\n        self.remap_transition(&before);\n    }\n\n    fn mac_prune(")
+# mac_prune (COSMIC_MAC_SPACES=1)
+replace_exact(SH,
+    "        let now = Instant::now();\n        let recent = MAC_RECENT.lock().unwrap().clone();\n",
+    "        let before = self.workspace_handles();\n"
+    "        let now = Instant::now();\n        let recent = MAC_RECENT.lock().unwrap().clone();\n")
+replace_exact(SH,
+    "            self.update_workspace_idxs(state);\n        }\n    }\n\n    fn update_workspace_idxs(",
+    "            self.update_workspace_idxs(state);\n        }\n        self.remap_transition(&before);\n    }\n\n    fn update_workspace_idxs(")
+# remove_workspace / remove_workspaces (also used by migrate_workspace, move_workspace and
+# add_output for the set a workspace leaves)
+replace_exact(SH,
+    "        let previous_active_handle = self.workspaces[self.active].handle;\n"
+    "        let idx = self.workspaces.iter().position(|w| w.handle == *handle)?;\n"
+    "        let workspace = self.workspaces.remove(idx);\n"
+    "        self.post_remove_workspace(workspace_state, &previous_active_handle);\n",
+    "        let previous_active_handle = self.workspaces[self.active].handle;\n"
+    "        let idx = self.workspaces.iter().position(|w| w.handle == *handle)?;\n"
+    "        let before = self.workspace_handles();\n"
+    "        let workspace = self.workspaces.remove(idx);\n"
+    "        self.post_remove_workspace(workspace_state, &previous_active_handle);\n"
+    "        self.remap_transition(&before);\n")
+replace_exact(SH,
+    "        let previous_active_handle = self.workspaces[self.active].handle;\n"
+    "        let (prefers, doesnt) = self.workspaces.drain(..).partition(cb);\n"
+    "        self.workspaces = doesnt;\n"
+    "        self.post_remove_workspace(workspace_state, &previous_active_handle);\n",
+    "        let previous_active_handle = self.workspaces[self.active].handle;\n"
+    "        let before = self.workspace_handles();\n"
+    "        let (prefers, doesnt) = self.workspaces.drain(..).partition(cb);\n"
+    "        self.workspaces = doesnt;\n"
+    "        self.post_remove_workspace(workspace_state, &previous_active_handle);\n"
+    "        self.remap_transition(&before);\n")
+# migrate_workspace: inserted after the active workspace of the receiving set
+replace_exact(SH,
+    "            new_set.workspaces.insert(new_set.active + 1, workspace);\n"
+    "            new_set.update_workspace_idxs(workspace_state);\n",
+    "            let before = new_set.workspace_handles();\n"
+    "            new_set.workspaces.insert(new_set.active + 1, workspace);\n"
+    "            new_set.remap_transition(&before);\n"
+    "            new_set.update_workspace_idxs(workspace_state);\n")
+# move_workspace, OutputBound (same set: removed and re-inserted; other set: inserted)
+replace_exact(SH,
+    "                let new_set = &mut self.sets[&new_output];\n"
+    "                let previous_active_handle = new_set.workspaces[new_set.active].handle;\n",
+    "                let new_set = &mut self.sets[&new_output];\n"
+    "                let previous_active_handle = new_set.workspaces[new_set.active].handle;\n"
+    "                let new_set_before = new_set.workspace_handles();\n")
+replace_exact(SH,
+    "                    .position(|w| w.handle == previous_active_handle)\n"
+    "                    .unwrap();\n"
+    "\n"
+    "                new_set.update_workspace_idxs(workspace_state);\n",
+    "                    .position(|w| w.handle == previous_active_handle)\n"
+    "                    .unwrap();\n"
+    "\n"
+    "                new_set.remap_transition(&new_set_before);\n"
+    "                new_set.update_workspace_idxs(workspace_state);\n")
+# move_workspace, Global (rotation in every set)
+replace_exact(SH,
+    "                        let previous_active_handle = set.workspaces[set.active].handle;\n"
+    "\n"
+    "                        if other_idx > old_idx {\n",
+    "                        let previous_active_handle = set.workspaces[set.active].handle;\n"
+    "                        let before = set.workspace_handles();\n"
+    "\n"
+    "                        if other_idx > old_idx {\n")
+replace_exact(SH,
+    "                            .unwrap();\n"
+    "\n"
+    "                        set.update_workspace_idxs(workspace_state);\n",
+    "                            .unwrap();\n"
+    "\n"
+    "                        set.remap_transition(&before);\n"
+    "                        set.update_workspace_idxs(workspace_state);\n")
+# update_config, OutputBound -> Global: missing workspaces inserted into sets
+replace_exact(SH,
+    "                for (j, pair) in pairs.iter().enumerate() {\n",
+    "                let befores: Vec<Vec<WorkspaceHandle>> =\n"
+    "                    self.sets.values().map(|s| s.workspace_handles()).collect();\n"
+    "                for (j, pair) in pairs.iter().enumerate() {\n")
+replace_exact(SH,
+    "                        // Otherwise we are fine\n"
+    "                    }\n"
+    "                }\n",
+    "                        // Otherwise we are fine\n"
+    "                    }\n"
+    "                }\n"
+    "                for (set, before) in self.sets.values_mut().zip(befores.iter()) {\n"
+    "                    set.remap_transition(before);\n"
+    "                }\n")
+# Workspaces::refresh, Global: empty workspaces removed from every set
+replace_exact(SH,
+    "                self.sets.values_mut().for_each(|s| {\n"
+    "                    let mut iter = keep.iter();\n",
+    "                let befores: Vec<Vec<WorkspaceHandle>> =\n"
+    "                    self.sets.values().map(|s| s.workspace_handles()).collect();\n"
+    "                self.sets.values_mut().for_each(|s| {\n"
+    "                    let mut iter = keep.iter();\n")
+replace_exact(SH,
+    "                self.sets.values_mut().for_each(|s| {\n"
+    "                    s.active = active;\n"
+    "                });\n",
+    "                self.sets.values_mut().for_each(|s| {\n"
+    "                    s.active = active;\n"
+    "                });\n"
+    "                for (set, before) in self.sets.values_mut().zip(befores.iter()) {\n"
+    "                    set.remap_transition(before);\n"
+    "                }\n")

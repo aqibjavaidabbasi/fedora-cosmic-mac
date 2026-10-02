@@ -587,6 +587,160 @@ impl Transition {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Stage B2: keeping the transition on the same workspaces when the list changes
+// ---------------------------------------------------------------------------------------------
+//
+// The transition lives in workspace-index units, but indices are only positions in the
+// output's workspace list. When that list changes (pruning, removal, insertion, reordering) the
+// same number can name a different workspace. Identity is the workspace handle, which the
+// shell has and this module does not, so the shell passes a map from every old index to the
+// new index of the same handle (see [`index_map`]).
+//
+// Model:
+// - The **referenced span** is every workspace index the transition draws now or will still
+//   draw: the integer neighbours of the current position, and while animating everything
+//   between the current position and the target. Overshoot past either end belongs to that end
+//   workspace. (The part of a curve already played is not referenced; the logical active
+//   workspace is owned by the shell, which passes its new index.)
+// - **Translation** (the normal case): if every workspace in the span survives and keeps the
+//   same relative order and spacing (`new = old + d` for one `d`), the whole transition shifts
+//   by `d`: position, tracking anchor, both ends of the running curve (springs and timed
+//   curves are translation-invariant, so the motion continues exactly, only renumbered) and
+//   the animation target. Nothing visible changes. `d == 0` (e.g. a change after the pair)
+//   leaves the transition untouched.
+// - **Fallback** (a referenced workspace was removed, or something was inserted or moved
+//   *inside* the span): the old position can no longer be expressed in the new list without
+//   naming a different workspace, so the transition is re-based on the logical active
+//   workspace, `new_active`:
+//   - idle or animating: snap to `new_active` (an animation always heads to the logical
+//     active workspace, so this is where it was going to end anyway);
+//   - tracking: keep tracking (the gesture is not taken away from the user), with the position
+//     on `new_active` and the anchor shifted by the same amount, so further finger movement
+//     continues relative to there. This is a visible jump, but only in this rare case and never
+//     onto a stale index.
+
+/// For each workspace in `before`, its index in `after` (`None` if it is gone). Workspaces are
+/// compared by identity (the shell passes handles).
+pub fn index_map<T: PartialEq>(before: &[T], after: &[T]) -> Vec<Option<usize>> {
+    before
+        .iter()
+        .map(|b| after.iter().position(|a| a == b))
+        .collect()
+}
+
+/// What [`Transition::remap`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemapOutcome {
+    /// Nothing the transition references moved.
+    Unchanged,
+    /// Everything it references moved by this many places; the transition was shifted with it.
+    Translated(isize),
+    /// A referenced workspace was removed or the span was reordered; the transition was
+    /// re-based on the logical active workspace.
+    FellBackToActive,
+}
+
+impl Transition {
+    /// The workspace indices (inclusive, within `0..workspace_count`) drawn now or still to be
+    /// drawn by the running animation. `None` for an empty list.
+    pub fn referenced_span(&self, now: Instant, workspace_count: usize) -> Option<(usize, usize)> {
+        if workspace_count == 0 {
+            return None;
+        }
+        let last = (workspace_count - 1) as f64;
+        let p = self.position(now);
+        let (lo, hi) = match self.mode {
+            Mode::Animating { target, .. } => (p.min(target as f64), p.max(target as f64)),
+            _ => (p, p),
+        };
+        // a position within SNAP_EPSILON of a workspace references only that workspace
+        let lo = (lo.clamp(0.0, last) + SNAP_EPSILON).floor() as usize;
+        let hi = (hi.clamp(0.0, last) - SNAP_EPSILON).ceil().max(0.0) as usize;
+        Some((lo.min(hi), hi))
+    }
+
+    /// The workspace list changed. `map[i]` is the new index of the workspace that was at index
+    /// `i` (see [`index_map`]), `new_count` the new number of workspaces and `new_active` the
+    /// new index of the logical active workspace (the shell's, after the change). See the model
+    /// above for what is kept and what happens when a referenced workspace is gone.
+    pub fn remap(
+        &mut self,
+        now: Instant,
+        map: &[Option<usize>],
+        new_count: usize,
+        new_active: usize,
+    ) -> RemapOutcome {
+        if new_count == 0 {
+            // never left empty by the shell; still, never keep an index into nothing
+            self.snap(0);
+            return RemapOutcome::FellBackToActive;
+        }
+        let new_active = new_active.min(new_count - 1);
+        let offset = |i: usize| -> Option<isize> {
+            map.get(i)
+                .copied()
+                .flatten()
+                .filter(|n| *n < new_count)
+                .map(|n| n as isize - i as isize)
+        };
+        let translation = self.referenced_span(now, map.len()).and_then(|(lo, hi)| {
+            let d = offset(lo)?;
+            (lo..=hi).all(|i| offset(i) == Some(d)).then_some(d)
+        });
+
+        match translation {
+            Some(0) => RemapOutcome::Unchanged,
+            Some(d) => {
+                self.translate(d, map);
+                RemapOutcome::Translated(d)
+            }
+            None => {
+                match self.mode {
+                    Mode::Tracking { anchor } => {
+                        let shift = new_active as f64 - self.position;
+                        self.position = new_active as f64;
+                        self.mode = Mode::Tracking {
+                            anchor: anchor + shift,
+                        };
+                    }
+                    _ => self.snap(new_active),
+                }
+                RemapOutcome::FellBackToActive
+            }
+        }
+    }
+
+    /// Shift everything by `d` workspaces. Only called when the referenced span (which always
+    /// contains an animation's target) maps by exactly `d`.
+    fn translate(&mut self, d: isize, map: &[Option<usize>]) {
+        let df = d as f64;
+        self.position += df;
+        match &mut self.mode {
+            Mode::Idle => {}
+            Mode::Tracking { anchor } => *anchor += df,
+            Mode::Animating { curve, target, .. } => {
+                match curve {
+                    Curve::Spring(spring) => {
+                        spring.from += df;
+                        spring.to += df;
+                    }
+                    Curve::Timed { from, to, .. } => {
+                        *from += df;
+                        *to += df;
+                    }
+                }
+                // The target is in the span, so the map has it. A target already outside the
+                // old list (stale) is shifted like everything else.
+                *target = match map.get(*target).copied().flatten() {
+                    Some(new) => new,
+                    None => (*target as isize + d).max(0) as usize,
+                };
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1803,5 +1957,406 @@ mod tests {
         let t = Transition::new(0);
         let v = t.view(now, 4);
         assert_eq!(pair_view(&v, 0, 3, -1), PairView { current: 0, previous: None });
+    }
+}
+
+/// Stage B2: the transition keeps referring to the same workspaces (by identity) when the
+/// workspace list changes. Workspaces are named by letters standing in for handles; every test
+/// checks *which workspaces are drawn*, not just the numbers.
+#[cfg(test)]
+mod remap_tests {
+    use super::*;
+
+    const TOL: f32 = 1e-5;
+
+    fn spring() -> SpringParams {
+        SpringParams::new(1.0, 600.0, 0.0001)
+    }
+
+    fn band() -> RubberBand {
+        RubberBand {
+            stiffness: 0.5,
+            limit: 0.25,
+        }
+    }
+
+    fn decide_params() -> DecideParams {
+        DecideParams {
+            velocity_threshold: 0.3,
+            position_threshold: 0.5,
+        }
+    }
+
+    fn at(base: Instant, ms: u64) -> Instant {
+        base + Duration::from_millis(ms)
+    }
+
+    /// The workspaces drawn at `now`: (primary, secondary, fraction, edge overshoot).
+    fn drawn(t: &Transition, now: Instant, list: &[char]) -> (char, Option<char>, f32, f32) {
+        let v = t.view(now, list.len());
+        (list[v.primary], v.secondary.map(|i| list[i]), v.fraction, v.edge)
+    }
+
+    fn same_drawing(a: (char, Option<char>, f32, f32), b: (char, Option<char>, f32, f32)) {
+        assert_eq!((a.0, a.1), (b.0, b.1), "different workspaces drawn: {a:?} vs {b:?}");
+        assert!((a.2 - b.2).abs() < TOL, "fraction moved: {a:?} vs {b:?}");
+        assert!((a.3 - b.3).abs() < TOL, "edge moved: {a:?} vs {b:?}");
+    }
+
+    /// Apply a list change. `active` is the logical active workspace after the change (what the
+    /// shell passes).
+    fn change(t: &mut Transition, now: Instant, before: &[char], after: &[char], active: char) -> RemapOutcome {
+        let map = index_map(before, after);
+        let new_active = after.iter().position(|h| *h == active).expect("active is in the new list");
+        t.remap(now, &map, after.len(), new_active)
+    }
+
+    /// Tracking from `list[active]` with a total finger delta of `delta` workspaces.
+    fn tracking(now: Instant, active: usize, delta: f64, count: usize) -> Transition {
+        let mut t = Transition::new(active);
+        t.begin_tracking(now, active);
+        t.track(delta, 0.0, count - 1, &band());
+        t
+    }
+
+    const ABCD: [char; 4] = ['A', 'B', 'C', 'D'];
+
+    #[test]
+    fn index_map_follows_identity() {
+        assert_eq!(index_map(&['A', 'B', 'C'], &['B', 'C']), vec![None, Some(0), Some(1)]);
+        assert_eq!(index_map(&['A', 'B'], &['B', 'X', 'A']), vec![Some(2), Some(0)]);
+        assert_eq!(index_map::<char>(&[], &['A']), Vec::<Option<usize>>::new());
+    }
+
+    // 1
+    #[test]
+    fn remove_before_the_pair_keeps_drawing_the_same_pair() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4); // B 0.4 of the way to C
+        let before = drawn(&t, now, &ABCD);
+        assert_eq!((before.0, before.1), ('B', Some('C')));
+        let after = ['B', 'C', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'B'), RemapOutcome::Translated(-1));
+        same_drawing(drawn(&t, now, &after), before);
+        assert!(t.is_tracking());
+    }
+
+    // 2 (a referenced workspace is removed)
+    /// Documented behavior: the primary (here also the active workspace) is gone, so the drag is
+    /// re-based on whatever the shell made active. It must not silently show the old numbers
+    /// (which would now be C <-> D).
+    #[test]
+    fn removing_the_primary_falls_back_to_the_new_active_workspace() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4);
+        let after = ['A', 'C', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'C'), RemapOutcome::FellBackToActive);
+        assert_eq!(drawn(&t, now, &after), ('C', None, 0.0, 0.0));
+        assert!(t.is_tracking(), "the gesture still belongs to the user");
+    }
+
+    // 3 (a referenced workspace is removed)
+    /// Documented behavior: dragging B toward C and C disappears. The drag jumps back onto B
+    /// (the active workspace) and keeps following the fingers from there: it never starts
+    /// showing D in C's place at the old fraction.
+    #[test]
+    fn removing_the_secondary_falls_back_and_tracking_continues_relative() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4);
+        let after = ['A', 'B', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'B'), RemapOutcome::FellBackToActive);
+        assert_eq!(drawn(&t, now, &after), ('B', None, 0.0, 0.0));
+        // the fingers move another 0.2 (total 0.6): 0.2 past B, toward D
+        t.track(0.6, 0.0, after.len() - 1, &band());
+        let d = drawn(&t, now, &after);
+        assert_eq!((d.0, d.1), ('B', Some('D')));
+        assert!((d.2 - 0.2).abs() < TOL);
+    }
+
+    // 4
+    #[test]
+    fn remove_after_the_pair_changes_nothing() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4);
+        let before = drawn(&t, now, &ABCD);
+        let after = ['A', 'B', 'C'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'B'), RemapOutcome::Unchanged);
+        same_drawing(drawn(&t, now, &after), before);
+    }
+
+    // 5
+    #[test]
+    fn remove_while_tracking_keeps_following_the_same_workspaces() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.2, 4);
+        let mut reference = t;
+        let after = ['B', 'C', 'D'];
+        change(&mut t, now, &ABCD, &after, 'B');
+        for delta in [0.3, 0.5, 0.9, 1.2] {
+            t.track(delta, 1.0, after.len() - 1, &band());
+            reference.track(delta, 1.0, ABCD.len() - 1, &band());
+            same_drawing(drawn(&t, now, &after), drawn(&reference, now, &ABCD));
+        }
+    }
+
+    // 6
+    #[test]
+    fn remove_while_the_release_spring_runs_keeps_the_motion_exact() {
+        let now = Instant::now();
+        let list = ['A', 'B', 'C', 'D', 'E'];
+        let mut t = tracking(now, 1, 0.6, list.len());
+        t.release(now, 2, 1.5, spring()); // settling on C
+        let reference = t;
+        let later = at(now, 40);
+        let after = ['B', 'C', 'D', 'E'];
+        assert_eq!(change(&mut t, later, &list, &after, 'C'), RemapOutcome::Translated(-1));
+        assert_eq!(t.target(), Some(1)); // still C
+        for ms in [40, 60, 100, 200, 400] {
+            same_drawing(drawn(&t, at(now, ms), &after), drawn(&reference, at(now, ms), &list));
+            assert!((t.velocity(at(now, ms)) - reference.velocity(at(now, ms))).abs() < 1e-9);
+        }
+        t.refresh(at(now, 5000));
+        assert!(t.is_idle());
+        assert_eq!(drawn(&t, at(now, 5000), &after), ('C', None, 0.0, 0.0));
+    }
+
+    // 7
+    #[test]
+    fn insert_before_the_pair_keeps_drawing_the_same_pair() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4);
+        let before = drawn(&t, now, &ABCD);
+        let after = ['X', 'A', 'B', 'C', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'B'), RemapOutcome::Translated(1));
+        same_drawing(drawn(&t, now, &after), before);
+    }
+
+    // 8
+    #[test]
+    fn insert_after_the_pair_changes_nothing() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4);
+        let before = drawn(&t, now, &ABCD);
+        let after = ['A', 'B', 'C', 'X', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'B'), RemapOutcome::Unchanged);
+        same_drawing(drawn(&t, now, &after), before);
+    }
+
+    /// Documented behavior: a workspace inserted *between* the two drawn workspaces (the shell
+    /// does this when a workspace is migrated to `active + 1`) breaks the pair, so the drag is
+    /// re-based on the active workspace instead of drawing B <-> X.
+    #[test]
+    fn insert_inside_the_pair_falls_back_to_the_active_workspace() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4);
+        let after = ['A', 'B', 'X', 'C', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'B'), RemapOutcome::FellBackToActive);
+        assert_eq!(drawn(&t, now, &after), ('B', None, 0.0, 0.0));
+    }
+
+    // 9
+    #[test]
+    fn reordering_a_workspace_outside_the_pair_keeps_the_pair() {
+        let now = Instant::now();
+        let list = ['A', 'B', 'C', 'D', 'E'];
+        let mut t = tracking(now, 2, 0.4, list.len()); // C 0.4 of the way to D
+        let before = drawn(&t, now, &list);
+        // A moved to the end: everything before the pair shifts left
+        let moved = ['B', 'C', 'D', 'E', 'A'];
+        assert_eq!(change(&mut t, now, &list, &moved, 'C'), RemapOutcome::Translated(-1));
+        same_drawing(drawn(&t, now, &moved), before);
+        // E moved to the front: everything shifts right
+        let moved2 = ['A', 'B', 'C', 'D', 'E'];
+        let mut t2 = tracking(now, 2, 0.4, list.len());
+        let front = ['E', 'A', 'B', 'C', 'D'];
+        assert_eq!(change(&mut t2, now, &moved2, &front, 'C'), RemapOutcome::Translated(1));
+        same_drawing(drawn(&t2, now, &front), before);
+    }
+
+    // 10
+    #[test]
+    fn transition_at_the_first_workspace() {
+        let now = Instant::now();
+        let mut t = tracking(now, 0, 0.3, 4); // A toward B
+        let before = drawn(&t, now, &ABCD);
+        let after = ['A', 'B', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'A'), RemapOutcome::Unchanged);
+        same_drawing(drawn(&t, now, &after), before);
+        let after2 = ['X', 'A', 'B', 'D'];
+        assert_eq!(change(&mut t, now, &after, &after2, 'A'), RemapOutcome::Translated(1));
+        same_drawing(drawn(&t, now, &after2), before);
+    }
+
+    // 11
+    #[test]
+    fn transition_at_the_last_workspace() {
+        let now = Instant::now();
+        let mut t = tracking(now, 3, 0.0, 4); // resting on D under the fingers
+        let after = ['A', 'C', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'D'), RemapOutcome::Translated(-1));
+        assert_eq!(drawn(&t, now, &after), ('D', None, 0.0, 0.0));
+        t.track(-0.5, 0.0, after.len() - 1, &band());
+        let d = drawn(&t, now, &after);
+        assert_eq!((d.0, d.1), ('C', Some('D')));
+    }
+
+    // 12
+    #[test]
+    fn rubber_band_below_the_first_workspace_keeps_its_overshoot() {
+        let now = Instant::now();
+        let mut t = tracking(now, 0, -0.5, 4);
+        let before = drawn(&t, now, &ABCD);
+        assert_eq!((before.0, before.1), ('A', None));
+        assert!(before.3 < 0.0);
+        let after = ['A', 'B', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'A'), RemapOutcome::Unchanged);
+        same_drawing(drawn(&t, now, &after), before);
+    }
+
+    // 13
+    #[test]
+    fn rubber_band_above_the_last_workspace_keeps_its_overshoot() {
+        let now = Instant::now();
+        let mut t = tracking(now, 3, 0.5, 4);
+        let before = drawn(&t, now, &ABCD);
+        assert_eq!((before.0, before.1), ('D', None));
+        assert!(before.3 > 0.0);
+        let after = ['B', 'C', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'D'), RemapOutcome::Translated(-1));
+        same_drawing(drawn(&t, now, &after), before);
+    }
+
+    // 14
+    #[test]
+    fn idle_transition_after_a_change_stays_on_its_workspace() {
+        let now = Instant::now();
+        let mut t = Transition::new(2); // idle on C
+        let after = ['B', 'C', 'D'];
+        assert_eq!(change(&mut t, now, &ABCD, &after, 'C'), RemapOutcome::Translated(-1));
+        assert!(t.is_idle());
+        assert_eq!(drawn(&t, now, &after), ('C', None, 0.0, 0.0));
+        // its own workspace removed: idle on whatever the shell made active
+        let after2 = ['B', 'D'];
+        assert_eq!(change(&mut t, now, &after, &after2, 'D'), RemapOutcome::FellBackToActive);
+        assert!(t.is_idle());
+        assert_eq!(drawn(&t, now, &after2), ('D', None, 0.0, 0.0));
+    }
+
+    // 15
+    #[test]
+    fn cancel_after_a_change_returns_to_the_origin_workspace() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.4, 4);
+        let after = ['B', 'C', 'D'];
+        change(&mut t, now, &ABCD, &after, 'B');
+        t.cancel(now, 0, spring()); // the shell's origin is B, now at index 0
+        let mid = drawn(&t, at(now, 30), &after);
+        assert_eq!((mid.0, mid.1), ('B', Some('C')));
+        t.refresh(at(now, 5000));
+        assert_eq!(drawn(&t, at(now, 5000), &after), ('B', None, 0.0, 0.0));
+    }
+
+    // 16
+    #[test]
+    fn finish_after_a_change_settles_on_the_intended_workspace() {
+        let now = Instant::now();
+        let mut t = tracking(now, 1, 0.7, 4); // B 0.7 of the way to C
+        let after = ['B', 'C', 'D'];
+        change(&mut t, now, &ABCD, &after, 'B');
+        let target = t.finish(now, 0, 0.0, after.len() - 1, decide_params(), spring());
+        assert_eq!(after[target], 'C');
+        t.refresh(at(now, 5000));
+        assert_eq!(drawn(&t, at(now, 5000), &after), ('C', None, 0.0, 0.0));
+    }
+
+    // 17
+    #[test]
+    fn retarget_after_a_change_starts_from_the_same_visual_state() {
+        let now = Instant::now();
+        let list = ['A', 'B', 'C', 'D', 'E'];
+        let mut t = Transition::new(1);
+        t.retarget_timed(now, 3, Duration::from_millis(200)); // B -> D
+        let mid = at(now, 60);
+        let seen = drawn(&t, mid, &list);
+        let after = ['B', 'C', 'D', 'E'];
+        assert_eq!(change(&mut t, mid, &list, &after, 'D'), RemapOutcome::Translated(-1));
+        same_drawing(drawn(&t, mid, &after), seen);
+        let v = t.velocity(mid);
+        // a shortcut back to B, now index 0
+        t.retarget_timed(mid, 0, Duration::from_millis(200));
+        same_drawing(drawn(&t, mid, &after), seen);
+        assert!((t.velocity(mid) - v).abs() < 1e-9, "velocity is carried over");
+        t.refresh(at(mid, 1000));
+        assert_eq!(drawn(&t, at(mid, 1000), &after), ('B', None, 0.0, 0.0));
+    }
+
+    // 18
+    #[test]
+    fn non_adjacent_timed_switch_with_changes_outside_and_inside_its_path() {
+        let now = Instant::now();
+        let list = ['A', 'B', 'C', 'D', 'E'];
+        let start = || {
+            let mut t = Transition::new(0);
+            t.retarget_timed(now, 3, Duration::from_millis(200)); // A -> D, passing B and C
+            t
+        };
+        let mid = at(now, 100);
+
+        // a workspace after the target: nothing changes
+        let mut t = start();
+        let seen = drawn(&t, mid, &list);
+        let after = ['A', 'B', 'C', 'D'];
+        assert_eq!(change(&mut t, mid, &list, &after, 'D'), RemapOutcome::Unchanged);
+        same_drawing(drawn(&t, mid, &after), seen);
+
+        // a workspace already passed (behind the current position): exact translation
+        let mut t = start();
+        assert!(t.position(mid) > 1.0);
+        let seen = drawn(&t, mid, &list);
+        let after = ['B', 'C', 'D', 'E'];
+        assert_eq!(change(&mut t, mid, &list, &after, 'D'), RemapOutcome::Translated(-1));
+        same_drawing(drawn(&t, mid, &after), seen);
+        assert_eq!(t.target(), Some(2)); // D
+
+        // a workspace still ahead on the path (C) is removed. Documented behavior: the
+        // animation cannot keep its path, so it lands on its destination (the active workspace)
+        // at once instead of sliding through a different workspace in C's place.
+        let mut t = start();
+        let after = ['A', 'B', 'D', 'E'];
+        assert_eq!(change(&mut t, mid, &list, &after, 'D'), RemapOutcome::FellBackToActive);
+        assert!(t.is_idle());
+        assert_eq!(drawn(&t, mid, &after), ('D', None, 0.0, 0.0));
+    }
+
+    /// Documented behavior: the target of a running animation is removed. The shell has already
+    /// picked a new active workspace; the transition snaps there.
+    #[test]
+    fn removing_the_animation_target_snaps_to_the_new_active_workspace() {
+        let now = Instant::now();
+        let mut t = Transition::new(1);
+        t.retarget_timed(now, 2, Duration::from_millis(200)); // B -> C
+        let after = ['A', 'B', 'D'];
+        assert_eq!(change(&mut t, at(now, 50), &ABCD, &after, 'B'), RemapOutcome::FellBackToActive);
+        assert!(t.is_idle());
+        assert_eq!(drawn(&t, at(now, 50), &after), ('B', None, 0.0, 0.0));
+    }
+
+    #[test]
+    fn degenerate_inputs_never_index_out_of_bounds() {
+        let now = Instant::now();
+        // empty old list
+        let mut t = Transition::new(0);
+        assert_eq!(t.remap(now, &[], 2, 1), RemapOutcome::FellBackToActive);
+        assert_eq!(t.view(now, 2).primary, 1);
+        // empty new list
+        let mut t = Transition::new(0);
+        assert_eq!(t.remap(now, &[None], 0, 0), RemapOutcome::FellBackToActive);
+        // new_active out of range is clamped
+        let mut t = Transition::new(3);
+        assert_eq!(t.remap(now, &[Some(0), None, None, None], 1, 9), RemapOutcome::FellBackToActive);
+        assert_eq!(t.view(now, 1).primary, 0);
+        // a map pointing past the new list is treated as removed
+        let mut t = Transition::new(0);
+        assert_eq!(t.remap(now, &[Some(5)], 2, 0), RemapOutcome::FellBackToActive);
     }
 }
