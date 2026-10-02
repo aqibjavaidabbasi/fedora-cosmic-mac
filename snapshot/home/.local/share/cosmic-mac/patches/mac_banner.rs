@@ -3,7 +3,7 @@
 //! A rounded, softly frosted card with the app icon on the left, the app name small and
 //! grey, a bold title and the message below, a close button, and a soft drop shadow so it
 //! stands out from whatever is behind it. Everything scales with the display: 1.0 up to
-//! 1080p, about 1.17 on a 2560-wide display and 1.5 on a 3840-wide (4K) one, read from
+//! 1080p, about 1.07 on a 2560-wide display and 1.22 on a 3840-wide (4K) one, read from
 //! `cosmic-randr` for the output the banner appears on.
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -63,7 +63,7 @@ pub fn refresh(output: Option<&str>) {
     }
     let w = wanted.unwrap_or(widest);
     if w > 0.0 {
-        let f = (1.0 + (w - 1920.0) / 1920.0 * 0.5).clamp(1.0, 1.75);
+        let f = (1.0 + (w - 1920.0) / 1920.0 * 0.22).clamp(1.0, 1.3);
         FACTOR.store(f.to_bits(), Ordering::Relaxed);
     }
 }
