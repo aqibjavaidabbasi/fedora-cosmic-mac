@@ -18,7 +18,7 @@ index b9692e0..1e90e0a 100644
              let Some(session) = session.as_mut() else {
                  return;
 diff --git a/src/main.rs b/src/main.rs
-index 4ba8e05..ab02e3e 100644
+index 4ba8e05..e42157c 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -112,6 +112,7 @@ enum Msg {
@@ -29,7 +29,20 @@ index 4ba8e05..ab02e3e 100644
      EnteredWorkspaceSidebarEntry(ExtWorkspaceHandleV1, bool),
      DbusInterface(zbus::Result<dbus::Interface>),
      DBus(dbus::Event),
-@@ -990,6 +991,43 @@ impl Application for App {
+@@ -458,10 +459,8 @@ impl App {
+                 .any(|w| w.handle().id() == workspace_handle)
+         }) {
+             let active = cosmic::theme::active();
+-            let rad = active
+-                .cosmic()
+-                .radius_s()
+-                .map(|x| if x < 4.0 { x } else { x + 8.0 });
++            let _ = &active;
++            let rad = [16.0f32; 4];
+ 
+             let mut rects = Vec::new();
+             let mut strips: Vec<Rectangle> = self
+@@ -990,6 +989,43 @@ impl Application for App {
                      }
                  }
              }
@@ -74,7 +87,7 @@ index 4ba8e05..ab02e3e 100644
                  if let Some(workspace) = self.workspaces.for_handle(&workspace_handle) {
                      self.send_wayland_cmd(backend::Cmd::SetWorkspacePinned(
 diff --git a/src/view/mod.rs b/src/view/mod.rs
-index ae2b727..af2820d 100644
+index ae2b727..ba77519 100644
 --- a/src/view/mod.rs
 +++ b/src/view/mod.rs
 @@ -216,6 +216,21 @@ fn pin_button(workspace: &Workspace) -> cosmic::Element<'static, Msg> {
@@ -123,3 +136,39 @@ index ae2b727..af2820d 100644
  
      widget::container(
          rectangle_track.container(
+@@ -506,17 +529,25 @@ fn workspaces_sidebar<'a>(
+                     cosmic::iced::widget::container::Style {
+                         text_color: Some(theme.cosmic().on_bg_color().into()),
+                         icon_color: Some(theme.cosmic().on_bg_color().into()),
+-                        background: Some(
+-                            iced::Color::from(theme.cosmic().background(theme.transparent).base)
+-                                .into(),
+-                        ),
++                        background: Some({
++                            let (top, bottom) = if theme.cosmic().is_dark {
++                                (iced::Color::from_rgba(0.24, 0.24, 0.27, 0.80), iced::Color::from_rgba(0.13, 0.13, 0.15, 0.86))
++                            } else {
++                                (iced::Color::from_rgba(0.99, 0.99, 1.0, 0.80), iced::Color::from_rgba(0.90, 0.90, 0.93, 0.88))
++                            };
++                            iced::Background::Gradient(iced::Gradient::Linear(
++                                iced::gradient::Linear::new(iced::Radians(std::f32::consts::PI))
++                                    .add_stop(0.0, top)
++                                    .add_stop(1.0, bottom),
++                            ))
++                        }),
+                         border: Border {
+-                            radius: theme
+-                                .cosmic()
+-                                .radius_s()
+-                                .map(|x| if x < 4.0 { x } else { x + 8.0 })
+-                                .into(),
+-                            ..Default::default()
++                            radius: 16.0.into(),
++                            width: 1.0,
++                            color: {
++                                let on: iced::Color = theme.cosmic().on_bg_color().into();
++                                iced::Color { a: 0.10, ..on }
++                            },
+                         },
+                         shadow: Shadow::default(),
+                         snap: true,

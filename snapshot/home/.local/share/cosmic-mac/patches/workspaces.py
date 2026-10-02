@@ -123,3 +123,42 @@ if n != 1:
     print("workspaces capture throttle patch failed", file=sys.stderr)
     sys.exit(1)
 open(p, "w").write(s)
+
+# --- the row of workspace thumbnails is a sheet of glossy glass like the Settings sidebar and the
+# top-bar popovers: the same tint and edge, blurred behind (the blur strips follow its corners).
+p = "src/view/mod.rs"
+s = open(p).read()
+s, g1 = re.subn(
+    r"                        background: Some\(\n                            iced::Color::from\(theme\.cosmic\(\)\.background\(theme\.transparent\)\.base\)\n                                \.into\(\),\n                        \),\n                        border: Border \{\n                            radius: theme\n                                \.cosmic\(\)\n                                \.radius_s\(\)\n                                \.map\(\|x\| if x < 4\.0 \{ x \} else \{ x \+ 8\.0 \}\)\n                                \.into\(\),\n                            \.\.Default::default\(\)\n                        \},",
+    """                        background: Some({
+                            let (top, bottom) = if theme.cosmic().is_dark {
+                                (iced::Color::from_rgba(0.24, 0.24, 0.27, 0.80), iced::Color::from_rgba(0.13, 0.13, 0.15, 0.86))
+                            } else {
+                                (iced::Color::from_rgba(0.99, 0.99, 1.0, 0.80), iced::Color::from_rgba(0.90, 0.90, 0.93, 0.88))
+                            };
+                            iced::Background::Gradient(iced::Gradient::Linear(
+                                iced::gradient::Linear::new(iced::Radians(std::f32::consts::PI))
+                                    .add_stop(0.0, top)
+                                    .add_stop(1.0, bottom),
+                            ))
+                        }),
+                        border: Border {
+                            radius: 16.0.into(),
+                            width: 1.0,
+                            color: {
+                                let on: iced::Color = theme.cosmic().on_bg_color().into();
+                                iced::Color { a: 0.10, ..on }
+                            },
+                        },""",
+    s, count=1)
+open(p, "w").write(s)
+p = "src/main.rs"
+s = open(p).read()
+s, g2 = re.subn(
+    r"            let rad = active\n                \.cosmic\(\)\n                \.radius_s\(\)\n                \.map\(\|x\| if x < 4\.0 \{ x \} else \{ x \+ 8\.0 \}\);\n",
+    "            let _ = &active;\n            let rad = [16.0f32; 4];\n",
+    s, count=1)
+open(p, "w").write(s)
+if (g1, g2) != (1, 1):
+    print("workspaces glass patch failed", g1, g2, file=sys.stderr)
+    sys.exit(1)
