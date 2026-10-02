@@ -636,3 +636,571 @@ replace_exact(INPUT,
 """,
     """        let (previous_workspace, workspace) = shell.workspaces.render_pair(output)?;
 """, count=2)
+
+# ---------------------------------------------------------------------------
+# Stage A3: compositor-owned swipe gestures.
+#   - ownership is decided once at GestureSwipeBegin (3 or 4 fingers and no pointer grab),
+#     never because the overview happens to be open
+#   - the A1 recognizer (dead zone, axis ratio, axis lock, cancellation) drives a `Session`
+#   - horizontal swipes drive the retargetable workspace transition (rubber band at the ends,
+#     decision by position and velocity in workspace units, cancel never activates)
+#   - vertical swipes open/close the overview once, through the compositor's own D-Bus session
+#     connection (no shell, no new process)
+#   - the old swipe machinery (`previously_active`, first-event direction, `end_workspace_swipe`)
+#     is removed
+shutil.copy(os.path.join(here, "mac_gesture_session.rs"), "src/input/gestures/session.rs")
+
+def replace_between(path, start_marker, end_marker, new, include_end=False):
+    s = open(path).read()
+    a = s.find(start_marker)
+    if a < 0 or s.count(start_marker) != 1:
+        print(f"A3 patch failed in {path}: start {start_marker[:60]!r} x{s.count(start_marker)}", file=sys.stderr)
+        sys.exit(1)
+    b = s.find(end_marker, a + len(start_marker))
+    if b < 0:
+        print(f"A3 patch failed in {path}: end {end_marker[:60]!r}", file=sys.stderr)
+        sys.exit(1)
+    if include_end:
+        b += len(end_marker)
+    open(path, "w").write(s[:a] + new + s[b:])
+
+# ---- gestures/mod.rs: keep RubberBand, drop the old first-event GestureState --------------------
+G = "src/input/gestures/mod.rs"
+g = open(G).read()
+i = g.index("// rubber_band.rs from Niri")
+open(G, "w").write('''pub mod recognizer;
+pub mod session;
+
+use smithay::output::Output;
+use std::sync::LazyLock;
+
+/// Who owns the swipe in progress. A compositor-owned swipe remembers the output it began on.
+pub type GestureOwner = session::Owner<Output>;
+
+/// Gesture tuning, read once from the environment (`COSMIC_MAC_GESTURE_*`, `COSMIC_MAC_SWIPE_LENGTH`).
+/// The defaults are provisional until they are set from real touchpad recordings.
+pub fn gesture_tuning() -> &'static session::Tuning {
+    static TUNING: LazyLock<session::Tuning> = LazyLock::new(|| {
+        session::Tuning::from_lookup(|name| std::env::var(name).ok().and_then(|v| v.trim().parse().ok()))
+    });
+    &TUNING
+}
+
+''' + g[i:])
+
+# ---- state.rs -------------------------------------------------------------------------------
+ST = "src/state.rs"
+replace_exact(ST, "    input::{PointerFocusState, gestures::GestureState},\n", "    input::{PointerFocusState, gestures::GestureOwner},\n")
+replace_exact(ST, "    pub gesture_state: Option<GestureState>,\n", "    pub gesture_owner: GestureOwner,\n")
+replace_exact(ST, "                gesture_state: None,\n", "                gesture_owner: GestureOwner::None,\n")
+
+# ---- dbus: a fire-and-forget call on the compositor's own session connection ---------------------
+replace_exact("src/dbus/mod.rs",
+    "    fn spawn(&self, fut: impl Future<Output = ()> + 'static) {\n",
+    r'''    /// Call a method without arguments on the session bus and ignore the reply. Uses the
+    /// compositor's existing session connection; nothing is spawned and nothing blocks.
+    pub fn call_session_method(
+        &self,
+        destination: &'static str,
+        path: &'static str,
+        interface: &'static str,
+        method: &'static str,
+    ) {
+        let state = self.clone();
+        self.spawn(async move {
+            match state.session_conn().await {
+                Ok(conn) => {
+                    if let Err(err) = conn
+                        .call_method(Some(destination), path, Some(interface), method, &())
+                        .await
+                    {
+                        tracing::warn!(?err, destination, method, "Session D-Bus call failed");
+                    }
+                }
+                Err(err) => tracing::warn!(?err, "No session D-Bus connection"),
+            }
+        });
+    }
+
+    fn spawn(&self, fut: impl Future<Output = ()> + 'static) {
+''')
+
+# ---- input/mod.rs: the swipe events ---------------------------------------------------------------
+IN = "src/input/mod.rs"
+replace_exact(IN, "        gestures::{GestureState, SwipeAction},\n",
+    "        gestures::{\n            gesture_tuning,\n            recognizer::Input as GestureInput,\n            session::OwnerKind,\n        },\n")
+SWIPE = r'''            InputEvent::GestureSwipeBegin { event, .. } => {
+                let maybe_seat = self
+                    .common
+                    .shell
+                    .read()
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned();
+                if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
+                    let pointer = seat.get_pointer().unwrap();
+                    // Ownership is decided here, once: 3 or 4 fingers and no pointer grab means
+                    // the compositor owns the gesture, anything else goes to the client. The
+                    // overview being open is deliberately not part of the decision.
+                    let output = seat.active_output();
+                    let previous = self.common.gesture_owner.begin(
+                        event.fingers(),
+                        pointer.is_grabbed(),
+                        gesture_tuning(),
+                        output,
+                    );
+                    if let Some((previous_output, action)) = previous {
+                        // a compositor session was still alive: abort it safely (never commits)
+                        self.apply_gesture_action(&previous_output, action);
+                    }
+                    if self.common.gesture_owner.kind() == OwnerKind::Client {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        pointer.gesture_swipe_begin(
+                            self,
+                            &GestureSwipeBeginEvent {
+                                serial,
+                                time: event.time(),
+                                fingers: event.fingers(),
+                            },
+                        );
+                    }
+                }
+            }
+            InputEvent::GestureSwipeUpdate { event, .. } => {
+                let maybe_seat = self
+                    .common
+                    .shell
+                    .read()
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned();
+                if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
+                    if self.common.gesture_owner.kind() == OwnerKind::Compositor {
+                        self.feed_compositor_gesture(GestureInput::Update {
+                            dx: event.delta().x,
+                            dy: event.delta().y,
+                            time: Duration::from_millis(event.time().millis() as u64),
+                        });
+                    } else {
+                        let pointer = seat.get_pointer().unwrap();
+                        pointer.gesture_swipe_update(
+                            self,
+                            &GestureSwipeUpdateEvent {
+                                time: event.time(),
+                                delta: event.delta(),
+                            },
+                        );
+                    }
+                }
+            }
+            InputEvent::GestureSwipeEnd { event, .. } => {
+                let maybe_seat = self
+                    .common
+                    .shell
+                    .read()
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned();
+                if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
+                    if self.common.gesture_owner.kind() == OwnerKind::Compositor {
+                        // a cancelled gesture is cancelled, never completed
+                        self.feed_compositor_gesture(GestureInput::End {
+                            cancelled: event.cancelled(),
+                            time: Duration::from_millis(event.time().millis() as u64),
+                        });
+                    } else {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let pointer = seat.get_pointer().unwrap();
+                        pointer.gesture_swipe_end(
+                            self,
+                            &GestureSwipeEndEvent {
+                                serial,
+                                time: event.time(),
+                                cancelled: event.cancelled(),
+                            },
+                        );
+                    }
+                    self.common.gesture_owner.end();
+                }
+            }
+'''
+replace_between(IN,
+    "            InputEvent::GestureSwipeBegin { event, .. } => {\n",
+    "            InputEvent::GesturePinchBegin { event, .. } => {\n",
+    SWIPE)
+
+# ---- input/actions.rs: helpers replace handle_swipe_action; shortcuts lose the gesture flag ------
+AC = "src/input/actions.rs"
+replace_exact(AC, "use super::gestures;\n",
+    "use super::gestures::{\n    GestureOwner,\n    recognizer::Input as GestureInput,\n    session::{Action as GestureAction, Context as GestureContext},\n};\nuse crate::utils::quirks::workspace_overview_is_open;\nuse smithay::output::Output;\n")
+HELPERS = r'''    /// What a compositor-owned swipe needs to know about the compositor right now.
+    pub fn gesture_context(&self, output: &Output) -> GestureContext {
+        let natural_scroll = self
+            .common
+            .config
+            .cosmic_conf
+            .input_touchpad
+            .scroll_config
+            .as_ref()
+            .and_then(|scroll| scroll.natural_scroll)
+            .unwrap_or(false);
+        GestureContext {
+            natural_scroll,
+            vertical_layout: self.common.config.cosmic_conf.workspaces.workspace_layout
+                == WorkspaceLayout::Vertical,
+            overview_open: workspace_overview_is_open(output),
+        }
+    }
+
+    /// Feed one event to the compositor-owned swipe and apply what it asks for.
+    pub fn feed_compositor_gesture(&mut self, input: GestureInput) {
+        let GestureOwner::Compositor { mut session, extra: output } =
+            std::mem::take(&mut self.common.gesture_owner)
+        else {
+            return;
+        };
+        let context = self.gesture_context(&output);
+        let action = session.feed(input, &context);
+        if !matches!(input, GestureInput::End { .. }) {
+            self.common.gesture_owner = GestureOwner::Compositor { session, extra: output.clone() };
+        }
+        self.apply_gesture_action(&output, action);
+    }
+
+    /// Apply one action of a compositor-owned swipe.
+    pub fn apply_gesture_action(&mut self, output: &Output, action: GestureAction) {
+        // `cosmic-workspaces` serves these on the session bus (src/dbus.rs of that project)
+        const WORKSPACES_BUS: &str = "com.system76.CosmicWorkspaces";
+        const WORKSPACES_PATH: &str = "/com/system76/CosmicWorkspaces";
+        const WORKSPACES_INTERFACE: &str = "com.system76.CosmicWorkspaces";
+        match action {
+            GestureAction::None => {}
+            GestureAction::WorkspaceTrack { first, total, velocity } => {
+                self.common.shell.write().workspace_swipe_track(output, first, total, velocity);
+            }
+            GestureAction::WorkspaceFinish { velocity } => {
+                self.common.shell.write().workspace_swipe_finish(
+                    output,
+                    velocity,
+                    &mut self.common.workspace_state.update(),
+                );
+            }
+            GestureAction::WorkspaceCancel => {
+                self.common.shell.write().workspace_swipe_cancel(output);
+            }
+            GestureAction::OverviewShow => self.common.dbus_state.call_session_method(
+                WORKSPACES_BUS,
+                WORKSPACES_PATH,
+                WORKSPACES_INTERFACE,
+                "Show",
+            ),
+            GestureAction::OverviewHide => self.common.dbus_state.call_session_method(
+                WORKSPACES_BUS,
+                WORKSPACES_PATH,
+                WORKSPACES_INTERFACE,
+                "Hide",
+            ),
+        }
+        if matches!(
+            action,
+            GestureAction::WorkspaceTrack { .. }
+                | GestureAction::WorkspaceFinish { .. }
+                | GestureAction::WorkspaceCancel
+        ) {
+            let outputs = self.common.shell.read().workspace_swipe_outputs(output);
+            for output in outputs {
+                self.backend.schedule_render(&output);
+            }
+        }
+    }
+
+'''
+replace_between(AC,
+    "    pub fn handle_swipe_action(&mut self, action: gestures::SwipeAction, seat: &Seat<State>) {\n",
+    "    #[profiling::function]\n    pub fn handle_shortcut_action(",
+    HELPERS)
+replace_exact(AC, "    seat: &Seat<State>,\n    gesture: bool,\n    wraparound: bool,\n", "    seat: &Seat<State>,\n    wraparound: bool,\n", count=2)
+replace_exact(AC, """        if gesture {
+            WorkspaceDelta::new_gesture(true)
+        } else {
+            WorkspaceDelta::new_shortcut()
+        },
+""", "        WorkspaceDelta::new_shortcut(),\n")
+replace_exact(AC, """        if gesture {
+            WorkspaceDelta::new_gesture(false)
+        } else {
+            WorkspaceDelta::new_shortcut()
+        },
+""", "        WorkspaceDelta::new_shortcut(),\n")
+replace_exact(AC, "                let next = to_next_workspace(\n                    &mut self.common.shell.write(),\n                    seat,\n                    false,\n",
+                  "                let next = to_next_workspace(\n                    &mut self.common.shell.write(),\n                    seat,\n")
+replace_exact(AC, "                let previous = to_previous_workspace(\n                    &mut self.common.shell.write(),\n                    seat,\n                    false,\n",
+                  "                let previous = to_previous_workspace(\n                    &mut self.common.shell.write(),\n                    seat,\n")
+
+# ---- shell/mod.rs ---------------------------------------------------------------------------------
+replace_exact(SH, "static GESTURE_MAX_LENGTH_CFG: std::sync::LazyLock<f64> =\n    std::sync::LazyLock::new(|| mac_env(\"COSMIC_MAC_SWIPE_LENGTH\", 150.0).max(10.0));\n", "")
+replace_exact(SH, "const GESTURE_POSITION_THRESHOLD: f64 = 0.5;\nconst GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;\n", "")
+replace_exact(SH, "    backend::render::animations::spring::{Spring, SpringParams},\n", "    backend::render::animations::spring::SpringParams,\n    input::gestures::{RubberBand, gesture_tuning},\n")
+replace_between(SH,
+    "#[derive(Debug, Clone, Copy)]\npub enum WorkspaceDelta {\n",
+    "#[derive(Debug)]\npub struct WorkspaceSet {\n",
+    r'''#[derive(Debug, Clone, Copy)]
+pub enum WorkspaceDelta {
+    /// A switch requested by a shortcut, the workspace protocol or an activation.
+    Shortcut(Instant),
+    /// How the renderer is told about the workspace that is leaving: `percentage` of the way out,
+    /// moving `forward` (toward a lower x) or not. Produced from the transition each frame.
+    Gesture { percentage: f64, forward: bool },
+}
+
+impl WorkspaceDelta {
+    pub fn new_shortcut() -> Self {
+        WorkspaceDelta::Shortcut(Instant::now())
+    }
+}
+
+''')
+replace_exact(SH,
+    "pub struct WorkspaceSet {\n    /// The live swipe's animation pair (unchanged by Stage A2).\n    previously_active: Option<(usize, WorkspaceDelta)>,\n    /// Retargetable transition used for every other kind of workspace switch.\n    transition: workspace_transition::Transition,\n",
+    "pub struct WorkspaceSet {\n    /// Every workspace switch (shortcut, protocol, swipe) is a position in workspace-index space.\n    transition: workspace_transition::Transition,\n")
+replace_exact(SH, "            previously_active: None,\n            transition: workspace_transition::Transition::new(0),\n", "            transition: workspace_transition::Transition::new(0),\n")
+replace_between(SH,
+    "    fn activate(\n        &mut self,\n        idx: usize,\n        workspace_delta: WorkspaceDelta,\n",
+    "    /// What to draw and hit-test now: the workspace shown as \"current\"",
+    r'''    /// Make `idx` the logical active workspace (protocol state and `active`) without touching
+    /// the visual transition. Returns the workspace that was active.
+    fn set_active(
+        &mut self,
+        idx: usize,
+        state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) -> usize {
+        let old_active = self.active;
+        state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Active);
+        state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Urgent);
+        state.remove_workspace_state(&self.workspaces[idx].handle, WState::Urgent);
+        state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
+        self.active = idx;
+        old_active
+    }
+
+    /// Switch to `idx` for a shortcut, a protocol request or an activation. The animation
+    /// starts from the current visual position and velocity (a running one is retargeted, never
+    /// replaced). `workspace_delta` is only kept so those callers need no change.
+    fn activate(
+        &mut self,
+        idx: usize,
+        _workspace_delta: WorkspaceDelta,
+        state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) -> Result<bool, InvalidWorkspaceIndex> {
+        if idx >= self.workspaces.len() {
+            return Err(InvalidWorkspaceIndex);
+        }
+
+        // Animate if workspaces overview isn't open
+        let animate = {
+            let layer_map = layer_map_for_output(&self.output);
+            !layer_map
+                .layers()
+                .any(|l| l.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
+        };
+
+        if self.active != idx {
+            let now = Instant::now();
+            let old_active = self.set_active(idx, state);
+            if self.transition.is_idle() {
+                // at rest the transition sits on the workspace we are leaving (indices may have
+                // changed since it last moved)
+                self.transition.snap(old_active);
+            }
+            if animate {
+                self.transition.retarget_timed(now, idx, ANIMATION_DURATION);
+            } else {
+                self.transition.snap(idx);
+            }
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// A swipe is tracking workspaces. `first` begins tracking from the current visual state
+    /// (position and velocity of a running animation are adopted, never reset to `active`).
+    fn swipe_track(&mut self, now: Instant, first: bool, total: f64, velocity: f64) {
+        let tuning = gesture_tuning();
+        if first {
+            self.transition.begin_tracking(now, self.active);
+        }
+        let last = self.workspaces.len().saturating_sub(1);
+        let band = RubberBand {
+            stiffness: tuning.band_stiffness,
+            limit: tuning.band_limit,
+        };
+        self.transition.track(total, velocity, last, &band);
+    }
+
+    /// The fingers lifted: pick the target and animate there. Only the target becomes the
+    /// logical active workspace, and only now. Ignored when something else (a shortcut, say)
+    /// took the transition over during the swipe.
+    fn swipe_finish(
+        &mut self,
+        now: Instant,
+        velocity: f64,
+        state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) {
+        if !self.transition.is_tracking() {
+            return;
+        }
+        let tuning = gesture_tuning();
+        let last = self.workspaces.len().saturating_sub(1);
+        let target = self.transition.finish(
+            now,
+            self.active,
+            velocity,
+            last,
+            workspace_transition::DecideParams {
+                velocity_threshold: tuning.velocity_threshold,
+                position_threshold: tuning.position_threshold,
+            },
+            swipe_spring(),
+        );
+        if target != self.active {
+            self.set_active(target, state);
+        }
+    }
+
+    /// The swipe was cancelled: animate back to the logical active workspace, activate nothing.
+    fn swipe_cancel(&mut self, now: Instant) {
+        if self.transition.is_tracking() {
+            self.transition.cancel(now, self.active, swipe_spring());
+        }
+    }
+
+''')
+replace_exact(SH,
+    "    /// What to draw and hit-test now: the workspace shown as \"current\" and, while switching,\n    /// the one leaving (`previous`), as `(handle, index, delta)`. The live swipe's pair wins when\n    /// there is one; otherwise it comes from the transition.\n",
+    "    /// What to draw and hit-test now: the workspace shown as \"current\" and, while switching,\n    /// the one leaving (`previous`), as `(handle, index, delta)`, derived from the transition.\n")
+replace_exact(SH,
+    "        if let Some((idx, delta)) = self.previously_active {\n            return (\n                self.workspaces.get(idx).map(|previous| (previous.handle, idx, delta)),\n                current,\n            );\n        }\n", "")
+replace_between(SH,
+    "    fn update_workspace_delta(&mut self, delta: f64, forward: bool) {\n",
+    "    fn set_output(&mut self, new_output: &Output, explicit: bool) {\n", "")
+replace_between(SH,
+    "    fn refresh(&mut self) {\n        if let Some((_, start)) = self.previously_active {\n",
+    "        self.sticky_layer.refresh();\n    }\n",
+    '''    fn refresh(&mut self) {
+        self.transition.refresh(Instant::now());
+        // like before, the active workspace is only refreshed while nothing is animating
+        if self.transition.is_idle() {
+            self.workspaces[self.active].refresh();
+        }
+        self.sticky_layer.refresh();
+    }
+''', include_end=True)
+replace_exact(SH,
+    """                (
+                    set.previously_active.and_then(|(idx, start)| {
+                        set.workspaces.get(idx).map(|previous| (previous, start))
+                    }),
+                    &set.workspaces[set.active],
+                )
+""",
+    """                (
+                    // the workspace that is leaving, as the renderer pairs it with the current one
+                    set.render_pair(Instant::now()).0.and_then(|(_, idx, delta)| {
+                        set.workspaces.get(idx).map(|previous| (previous, delta))
+                    }),
+                    &set.workspaces[set.active],
+                )
+""")
+replace_exact(SH,
+    "        (set.previously_active.map(|(idx, _)| idx), set.active)\n",
+    "        (set.render_pair(Instant::now()).0.map(|(_, idx, _)| idx), set.active)\n")
+replace_exact(SH,
+    """            set.previously_active
+                .as_ref()
+                .is_some_and(|(_, delta)| delta.is_animating())
+                || set.transition.is_animating(Instant::now())
+                || set.sticky_layer.animations_going()
+""",
+    """            set.transition.is_animating(Instant::now()) || set.sticky_layer.animations_going()
+""")
+replace_between(SH,
+    "    pub fn update_workspace_delta(&mut self, output: &Output, delta: f64, forward: bool) {\n",
+    "    /// Handle a client's ext-workspace create request",
+    "")
+replace_between(SH,
+    "    pub fn end_workspace_swipe(\n",
+    "    pub fn active_space(&self, output: &Output) -> Option<&Workspace> {\n",
+    r'''    /// The outputs whose workspace sets move together with `output` during a swipe.
+    pub fn workspace_swipe_outputs(&self, output: &Output) -> Vec<Output> {
+        match self.workspaces.mode {
+            WorkspaceMode::OutputBound => vec![output.clone()],
+            WorkspaceMode::Global => self.workspaces.sets.keys().cloned().collect(),
+        }
+    }
+
+    fn workspace_swipe_sets(&mut self, output: &Output) -> Vec<&mut WorkspaceSet> {
+        match self.workspaces.mode {
+            WorkspaceMode::OutputBound => self.workspaces.sets.get_mut(output).into_iter().collect(),
+            WorkspaceMode::Global => self.workspaces.sets.values_mut().collect(),
+        }
+    }
+
+    /// A workspace swipe is tracking. `total` and `velocity` are in workspace units (positive =
+    /// toward a higher index); `first` begins tracking from the current visual state.
+    pub fn workspace_swipe_track(&mut self, output: &Output, first: bool, total: f64, velocity: f64) {
+        let now = Instant::now();
+        for set in self.workspace_swipe_sets(output) {
+            set.swipe_track(now, first, total, velocity);
+        }
+    }
+
+    /// The fingers lifted after a workspace swipe: settle on the chosen workspace.
+    pub fn workspace_swipe_finish(
+        &mut self,
+        output: &Output,
+        velocity: f64,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) {
+        let now = Instant::now();
+        let cleanup = matches!(self.workspaces.mode, WorkspaceMode::OutputBound)
+            && matches!(
+                self.overview_mode.active_trigger(),
+                Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
+            );
+        for set in self.workspace_swipe_sets(output) {
+            if cleanup {
+                set.workspaces[set.active].tiling_layer.cleanup_drag();
+            }
+            set.swipe_finish(now, velocity, workspace_state);
+        }
+    }
+
+    /// A workspace swipe was cancelled: go back to the logical workspace, activate nothing.
+    pub fn workspace_swipe_cancel(&mut self, output: &Output) {
+        let now = Instant::now();
+        for set in self.workspace_swipe_sets(output) {
+            set.swipe_cancel(now);
+        }
+    }
+
+''')
+# the release spring (existing tuning knobs), used by the swipe methods
+replace_exact(SH, "static MAC_SPACES: std::sync::LazyLock<bool> =",
+    "fn swipe_spring() -> SpringParams {\n    SpringParams::new(*SPRING_DAMPING_CFG, *SPRING_STIFFNESS_CFG, 0.0001)\n}\nstatic MAC_SPACES: std::sync::LazyLock<bool> =")
+
+# unused imports left behind in input/mod.rs, and the renderer's match on the removed variant
+replace_exact(IN, "use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};\n", "use cosmic_comp_config::NumlockState;\n")
+replace_exact(IN, "use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};\n", "use cosmic_settings_config::shortcuts::action::ResizeDirection;\n")
+replace_exact("src/shell/focus/order.rs", """                WorkspaceDelta::GestureEnd {
+                    start,
+                    spring,
+                    forward,
+                } => (
+                    *forward,
+                    (spring.value_at(Instant::now().duration_since(*start)) as f32).clamp(0.0, 1.0),
+                ),
+""", "")

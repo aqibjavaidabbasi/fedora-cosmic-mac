@@ -192,7 +192,10 @@ impl Recognizer {
                     }
                 }
             },
-            Input::End { cancelled, .. } => {
+            Input::End { cancelled, time } => {
+                // only movement within the last 150 ms before the fingers lift counts: resting
+                // before lifting is not a flick
+                self.history.retain(|s| time <= s.time + HISTORY_LIMIT);
                 let out = match self.phase {
                     Phase::Idle => Output::None,
                     Phase::Possible => Output::Cancel { distance: 0.0 },
@@ -669,6 +672,34 @@ mod tests {
                 assert_eq!(distance, 400.0);
                 assert!((velocity - 100.0).abs() < 15.0, "velocity = {velocity}");
             }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn resting_before_lifting_has_zero_velocity() {
+        let mut r = started(3);
+        for i in 1..=10u64 {
+            upd(&mut r, 10.0, 0.0, i * 10);
+        }
+        // fingers rest for half a second, then lift
+        match end(&mut r, false, 600) {
+            Output::Finish { velocity, distance, .. } => {
+                assert_eq!(velocity, 0.0);
+                assert_eq!(distance, 100.0);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifting_right_after_moving_keeps_the_velocity() {
+        let mut r = started(3);
+        for i in 1..=10u64 {
+            upd(&mut r, 10.0, 0.0, i * 10);
+        }
+        match end(&mut r, false, 110) {
+            Output::Finish { velocity, .. } => assert!((velocity - 1000.0).abs() < 1e-6),
             other => panic!("{other:?}"),
         }
     }

@@ -491,6 +491,32 @@ impl Transition {
         };
     }
 
+    /// The fingers lifted normally: choose the target with [`decide`] and animate there from
+    /// the current visual state. `origin` is the logical active workspace the gesture started
+    /// from, `velocity` the release velocity (workspace units per second). Returns the target;
+    /// the caller makes it the logical active workspace when it differs from `origin`.
+    pub fn finish(
+        &mut self,
+        now: Instant,
+        origin: usize,
+        velocity: f64,
+        last: usize,
+        decide_params: DecideParams,
+        spring: SpringParams,
+    ) -> usize {
+        let target = decide(self.position(now), velocity, origin, last, decide_params);
+        let visual = self.velocity(now);
+        self.release(now, target, visual, spring);
+        target
+    }
+
+    /// The gesture was cancelled: animate back to the logical active workspace `origin`.
+    /// Nothing is activated.
+    pub fn cancel(&mut self, now: Instant, origin: usize, spring: SpringParams) {
+        let visual = self.velocity(now);
+        self.release(now, origin, visual, spring);
+    }
+
     /// Animate from the current visual position **and velocity** to `target` over `duration`
     /// (keyboard shortcuts, protocol activation). From rest this is exactly the existing
     /// EaseInOutCubic.

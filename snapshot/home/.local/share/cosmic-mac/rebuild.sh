@@ -108,7 +108,7 @@ save_feature() {
 if stale "$VER" built-version; then
     SRC=$D/build/cosmic-comp
     if checkout "$SRC" cosmic-comp "epoch-$VER" && apply_feature compositor . \
-        && grep -q "3 | 4 => {" src/input/mod.rs \
+        && grep -q "OwnerKind::Compositor" src/input/mod.rs \
         && nice -n 19 cargo build --release --locked -Zgit=shallow-deps; then
         install -Dm755 "$CARGO_TARGET_DIR/release/cosmic-comp" "$D/bin/cosmic-comp.new" && mv -f "$D/bin/cosmic-comp.new" "$D/bin/cosmic-comp"
         save_feature compositor .
