@@ -1,3 +1,49 @@
+diff --git a/src/backend/render/animations/spring.rs b/src/backend/render/animations/spring.rs
+index 72b4390..45388f6 100644
+--- a/src/backend/render/animations/spring.rs
++++ b/src/backend/render/animations/spring.rs
+@@ -41,6 +41,41 @@ impl Spring {
+         self.oscillate(t.as_secs_f64())
+     }
+ 
++    /// Velocity of the spring (the derivative of `value_at`) at time `t`, in the same units per
++    /// second as the position. At `t = 0` this is `initial_velocity`.
++    pub fn velocity_at(&self, t: Duration) -> f64 {
++        self.derivative(t.as_secs_f64())
++    }
++
++    fn derivative(&self, t: f64) -> f64 {
++        let b = self.params.damping;
++        let m = self.params.mass;
++        let k = self.params.stiffness;
++        let v0 = self.initial_velocity;
++
++        let beta = b / (2. * m);
++        let omega0 = (k / m).sqrt();
++        let x0 = self.from - self.to;
++        let envelope = (-beta * t).exp();
++        // c = beta * x0 + v0 appears in every regime
++        let c = beta * x0 + v0;
++
++        if (beta - omega0).abs() <= f64::from(f32::EPSILON) {
++            // Critically damped.
++            envelope * (v0 - beta * c * t)
++        } else if beta < omega0 {
++            // Underdamped.
++            let omega1 = ((omega0 * omega0) - (beta * beta)).sqrt();
++            let a = c / omega1;
++            envelope * (v0 * (omega1 * t).cos() + (-x0 * omega1 - beta * a) * (omega1 * t).sin())
++        } else {
++            // Overdamped.
++            let omega2 = ((beta * beta) - (omega0 * omega0)).sqrt();
++            let a = c / omega2;
++            envelope * (v0 * (omega2 * t).cosh() + (x0 * omega2 - beta * a) * (omega2 * t).sinh())
++        }
++    }
++
+     // Based on libadwaita (LGPL-2.1-or-later):
+     // https://gitlab.gnome.org/GNOME/libadwaita/-/blob/1.4.4/src/adw-spring-animation.c,
+     // which itself is based on (MIT):
 diff --git a/src/backend/render/wayland/blur_effect.rs b/src/backend/render/wayland/blur_effect.rs
 index b8a7935..038294f 100644
 --- a/src/backend/render/wayland/blur_effect.rs
@@ -102,10 +148,16 @@ index 8639ba6..cff4f08 100644
      }
  
 diff --git a/src/input/gestures/mod.rs b/src/input/gestures/mod.rs
-index 6c9c2f3..4df5f19 100644
+index 6c9c2f3..b0f57ac 100644
 --- a/src/input/gestures/mod.rs
 +++ b/src/input/gestures/mod.rs
-@@ -16,6 +16,8 @@ pub struct SwipeEvent {
+@@ -1,3 +1,5 @@
++pub mod recognizer;
++
+ use cosmic_settings_config::shortcuts::action::Direction;
+ use smithay::utils::{Logical, Point};
+ use std::{collections::VecDeque, time::Duration};
+@@ -16,6 +18,8 @@ pub struct SwipeEvent {
  pub enum SwipeAction {
      NextWorkspace,
      PrevWorkspace,
@@ -257,10 +309,18 @@ index fa4a187..7d33adc 100644
  }
  
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 47d7885..bc421a6 100644
+index 47d7885..21ae214 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
-@@ -122,7 +122,19 @@ use self::{
+@@ -96,6 +96,7 @@ use crate::{
+ pub mod element;
+ pub mod focus;
+ pub mod grabs;
++pub mod workspace_transition;
+ pub mod layout;
+ mod seats;
+ mod workspace;
+@@ -122,7 +123,19 @@ use self::{
  };
  
  const ANIMATION_DURATION: Duration = Duration::from_millis(200);
@@ -281,7 +341,7 @@ index 47d7885..bc421a6 100644
  const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
  const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
  const MOVE_GRAB_Y_OFFSET: f64 = 16.;
-@@ -338,7 +350,7 @@ impl WorkspaceDelta {
+@@ -338,7 +351,7 @@ impl WorkspaceDelta {
      }
  
      pub fn new_gesture_end(delta: f64, velocity: f64, forward: bool) -> Self {
@@ -290,7 +350,7 @@ index 47d7885..bc421a6 100644
          WorkspaceDelta::GestureEnd {
              start: Instant::now(),
              forward,
-@@ -570,7 +582,7 @@ impl WorkspaceSet {
+@@ -570,7 +583,7 @@ impl WorkspaceSet {
      }
  
      fn update_workspace_delta(&mut self, delta: f64, forward: bool) {
@@ -299,7 +359,7 @@ index 47d7885..bc421a6 100644
          if let Some((idx, _)) = self.previously_active {
              self.previously_active = Some((
                  idx,
-@@ -644,6 +656,10 @@ impl WorkspaceSet {
+@@ -644,6 +657,10 @@ impl WorkspaceSet {
          state: &mut WorkspaceUpdateGuard<State>,
          xdg_activation_state: &XdgActivationState,
      ) {
@@ -310,7 +370,7 @@ index 47d7885..bc421a6 100644
          // add empty at the end, if necessary
          if self
              .workspaces
-@@ -693,6 +709,47 @@ impl WorkspaceSet {
+@@ -693,6 +710,47 @@ impl WorkspaceSet {
          }
      }
  
@@ -358,7 +418,7 @@ index 47d7885..bc421a6 100644
      fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
          for (i, workspace) in self.workspaces.iter().enumerate() {
              workspace_set_idx(
-@@ -1800,6 +1857,21 @@ impl Shell {
+@@ -1800,6 +1858,21 @@ impl Shell {
          }
      }
  
@@ -380,7 +440,7 @@ index 47d7885..bc421a6 100644
      pub fn end_workspace_swipe(
          &mut self,
          output: &Output,
-@@ -3434,13 +3506,24 @@ impl Shell {
+@@ -3434,13 +3507,24 @@ impl Shell {
                      self.theme.clone(),
                      self.appearance_conf,
                  ));

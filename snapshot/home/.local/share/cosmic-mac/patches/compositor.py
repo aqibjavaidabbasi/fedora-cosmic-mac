@@ -377,3 +377,60 @@ if (b1, b2, b3) != (1, 1, 1) or b4 != 2:
     print("blur speed-up patch failed", (b1, b2, b3, b4), file=sys.stderr)
     sys.exit(1)
 open(p, "w").write(s)
+
+# ---------------------------------------------------------------------------
+# Stage A1 (behavior-neutral): pure recognizer and workspace-transition modules, and
+# `Spring::velocity_at`. Nothing in the running compositor uses them yet (steps A2 to A4 will),
+# so the compositor behaves exactly as before. Unit tests live in the new files
+# (`cargo test --lib`).
+import os, shutil
+here = os.path.dirname(os.path.abspath(__file__))
+shutil.copy(os.path.join(here, "mac_recognizer.rs"), "src/input/gestures/recognizer.rs")
+shutil.copy(os.path.join(here, "mac_workspace_transition.rs"), "src/shell/workspace_transition.rs")
+
+patch("src/input/gestures/mod.rs", [
+    (r"(use cosmic_settings_config::shortcuts::action::Direction;\n)",
+     "pub mod recognizer;\n\n\\1"),
+])
+patch("src/shell/mod.rs", [
+    (r"(pub mod grabs;\n)", "\\1pub mod workspace_transition;\n"),
+])
+patch("src/backend/render/animations/spring.rs", [
+    (r"(    pub fn value_at\(&self, t: Duration\) -> f64 \{\n        self\.oscillate\(t\.as_secs_f64\(\)\)\n    \}\n)",
+     """\\1
+    /// Velocity of the spring (the derivative of `value_at`) at time `t`, in the same units per
+    /// second as the position. At `t = 0` this is `initial_velocity`.
+    pub fn velocity_at(&self, t: Duration) -> f64 {
+        self.derivative(t.as_secs_f64())
+    }
+
+    fn derivative(&self, t: f64) -> f64 {
+        let b = self.params.damping;
+        let m = self.params.mass;
+        let k = self.params.stiffness;
+        let v0 = self.initial_velocity;
+
+        let beta = b / (2. * m);
+        let omega0 = (k / m).sqrt();
+        let x0 = self.from - self.to;
+        let envelope = (-beta * t).exp();
+        // c = beta * x0 + v0 appears in every regime
+        let c = beta * x0 + v0;
+
+        if (beta - omega0).abs() <= f64::from(f32::EPSILON) {
+            // Critically damped.
+            envelope * (v0 - beta * c * t)
+        } else if beta < omega0 {
+            // Underdamped.
+            let omega1 = ((omega0 * omega0) - (beta * beta)).sqrt();
+            let a = c / omega1;
+            envelope * (v0 * (omega1 * t).cos() + (-x0 * omega1 - beta * a) * (omega1 * t).sin())
+        } else {
+            // Overdamped.
+            let omega2 = ((beta * beta) - (omega0 * omega0)).sqrt();
+            let a = c / omega2;
+            envelope * (v0 * (omega2 * t).cosh() + (x0 * omega2 - beta * a) * (omega2 * t).sinh())
+        }
+    }
+"""),
+])
