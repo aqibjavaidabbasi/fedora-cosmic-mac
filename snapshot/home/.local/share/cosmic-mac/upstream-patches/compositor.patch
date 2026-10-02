@@ -904,7 +904,7 @@ index fb904c0..fbbd97c 100644
  
              let offset = Point::<i32, Logical>::from(match (layout, forward) {
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 47d7885..6973fc3 100644
+index 47d7885..5588133 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
 @@ -73,7 +73,8 @@ use smithay::{
@@ -949,7 +949,49 @@ index 47d7885..6973fc3 100644
  const MOVE_GRAB_Y_OFFSET: f64 = 16.;
  const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
  
-@@ -315,57 +328,23 @@ pub struct SessionLock {
+@@ -254,6 +267,41 @@ impl From<&CosmicSurface> for ActivationKey {
+     }
+ }
+ 
++/// cosmic-mac: app ids (one per line, case-insensitive) whose windows open like
++/// macOS menu-bar popovers, from ~/.config/cosmic-mac/tray-popovers (read at login).
++static MAC_TRAY_POPOVERS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
++    let path = format!("{}/.config/cosmic-mac/tray-popovers", std::env::var("HOME").unwrap_or_default());
++    match std::fs::read_to_string(path) {
++        Ok(text) => text
++            .lines()
++            .map(str::trim)
++            .filter(|l| !l.is_empty() && !l.starts_with('#'))
++            .map(str::to_lowercase)
++            .collect(),
++        Err(_) => vec!["clippy".to_string()],
++    }
++});
++
++fn mac_is_tray_popover(window: &CosmicSurface) -> bool {
++    let app_id = window.app_id().to_lowercase();
++    !app_id.is_empty() && MAC_TRAY_POPOVERS.iter().any(|a| *a == app_id)
++}
++
++/// Output-local spot for a tray popover: centered on the pointer, 6px below the top bar.
++fn mac_tray_popover_position(
++    seat: &Seat<State>,
++    output: &Output,
++    size: Size<i32, Logical>,
++) -> Option<Point<i32, Local>> {
++    let pointer = seat.get_pointer()?.current_location();
++    let output_loc = output.geometry().loc;
++    let zone = layer_map_for_output(output).non_exclusive_zone();
++    let x = (pointer.x as i32 - output_loc.x - size.w / 2)
++        .min(zone.loc.x + zone.size.w - size.w - 6)
++        .max(zone.loc.x + 6);
++    Some(Point::from((x, zone.loc.y + 6)))
++}
++
+ #[derive(Debug)]
+ pub struct PendingWindow {
+     pub surface: CosmicSurface,
+@@ -315,57 +363,23 @@ pub struct SessionLock {
  
  #[derive(Debug, Clone, Copy)]
  pub enum WorkspaceDelta {
@@ -1013,7 +1055,7 @@ index 47d7885..6973fc3 100644
      pub active: usize,
      pub group: WorkspaceGroupHandle,
      tiling_enabled: bool,
-@@ -500,7 +479,7 @@ impl WorkspaceSet {
+@@ -500,7 +514,7 @@ impl WorkspaceSet {
          let sticky_layer = FloatingLayout::new(theme.clone(), appearance, output);
  
          WorkspaceSet {
@@ -1022,7 +1064,7 @@ index 47d7885..6973fc3 100644
              active: 0,
              group: group_handle,
              tiling_enabled,
-@@ -513,10 +492,29 @@ impl WorkspaceSet {
+@@ -513,10 +527,29 @@ impl WorkspaceSet {
          }
      }
  
@@ -1053,7 +1095,7 @@ index 47d7885..6973fc3 100644
          state: &mut WorkspaceUpdateGuard<'_, State>,
      ) -> Result<bool, InvalidWorkspaceIndex> {
          if idx >= self.workspaces.len() {
-@@ -524,64 +522,123 @@ impl WorkspaceSet {
+@@ -524,64 +557,123 @@ impl WorkspaceSet {
          }
  
          // Animate if workspaces overview isn't open
@@ -1218,7 +1260,7 @@ index 47d7885..6973fc3 100644
      fn set_output(&mut self, new_output: &Output, explicit: bool) {
          self.sticky_layer.set_output(new_output);
          for window in self.sticky_layer.windows() {
-@@ -595,25 +652,9 @@ impl WorkspaceSet {
+@@ -595,25 +687,9 @@ impl WorkspaceSet {
      }
  
      fn refresh(&mut self) {
@@ -1247,7 +1289,7 @@ index 47d7885..6973fc3 100644
              self.workspaces[self.active].refresh();
          }
          self.sticky_layer.refresh();
-@@ -644,6 +685,10 @@ impl WorkspaceSet {
+@@ -644,6 +720,10 @@ impl WorkspaceSet {
          state: &mut WorkspaceUpdateGuard<State>,
          xdg_activation_state: &XdgActivationState,
      ) {
@@ -1258,7 +1300,7 @@ index 47d7885..6973fc3 100644
          // add empty at the end, if necessary
          if self
              .workspaces
-@@ -693,6 +738,47 @@ impl WorkspaceSet {
+@@ -693,6 +773,47 @@ impl WorkspaceSet {
          }
      }
  
@@ -1306,7 +1348,7 @@ index 47d7885..6973fc3 100644
      fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
          for (i, workspace) in self.workspaces.iter().enumerate() {
              workspace_set_idx(
-@@ -1346,14 +1432,31 @@ impl Workspaces {
+@@ -1346,14 +1467,31 @@ impl Workspaces {
              .or(self.backup_set.as_ref())
              .map(|set| {
                  (
@@ -1340,7 +1382,7 @@ index 47d7885..6973fc3 100644
      pub fn active_mut(&mut self, output: &Output) -> Option<&mut Workspace> {
          self.sets
              .get_mut(output)
-@@ -1363,7 +1466,7 @@ impl Workspaces {
+@@ -1363,7 +1501,7 @@ impl Workspaces {
  
      pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
          let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
@@ -1349,7 +1391,7 @@ index 47d7885..6973fc3 100644
      }
  
      pub fn idx_for_handle(&self, output: &Output, handle: &WorkspaceHandle) -> Option<usize> {
-@@ -1785,115 +1888,71 @@ impl Shell {
+@@ -1785,115 +1923,71 @@ impl Shell {
          }
      }
  
@@ -1521,7 +1563,7 @@ index 47d7885..6973fc3 100644
          }
      }
  
-@@ -2294,10 +2353,7 @@ impl Shell {
+@@ -2294,10 +2388,7 @@ impl Shell {
  
      pub fn animations_going(&self) -> bool {
          self.workspaces.sets.values().any(|set| {
@@ -1533,7 +1575,45 @@ index 47d7885..6973fc3 100644
          }) || !matches!(
              self.overview_mode,
              OverviewMode::None | OverviewMode::Active(_)
-@@ -3434,13 +3490,24 @@ impl Shell {
+@@ -2931,6 +3022,7 @@ impl Shell {
+         let workspace_handle = workspace.handle;
+         let is_dialog = layout::is_dialog(&window);
+         let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);
++        let mac_popover = mac_is_tray_popover(&window);
+ 
+         if should_be_fullscreen {
+             workspace.map_fullscreen(&window, &seat, None, None);
+@@ -2949,6 +3041,7 @@ impl Shell {
+             && !should_be_minimized
+             && !should_be_maximized
+             && !(workspace.is_tiled(&focused.active_window()) && floating_exception)
++            && !mac_popover
+         {
+             stack.add_window(window, None, None);
+             if was_activated {
+@@ -2970,8 +3063,11 @@ impl Shell {
+         }
+ 
+         let workspace_empty = workspace.mapped().next().is_none();
+-        if is_dialog || floating_exception || !workspace.tiling_enabled {
+-            workspace.floating_layer.map(mapped.clone(), None);
++        if is_dialog || floating_exception || mac_popover || !workspace.tiling_enabled {
++            let position = mac_popover
++                .then(|| mac_tray_popover_position(&seat, &workspace_output, mapped.geometry().size))
++                .flatten();
++            workspace.floating_layer.map(mapped.clone(), position);
+         } else {
+             for mapped in workspace
+                 .mapped()
+@@ -3004,6 +3100,7 @@ impl Shell {
+             None
+         } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)
+             || should_be_sticky
++            || mac_popover
+         {
+             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
+             Some(KeyboardFocusTarget::from(mapped.clone()))
+@@ -3434,13 +3531,24 @@ impl Shell {
                      self.theme.clone(),
                      self.appearance_conf,
                  ));

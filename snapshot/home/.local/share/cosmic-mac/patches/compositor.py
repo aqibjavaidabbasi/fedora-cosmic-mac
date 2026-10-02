@@ -1204,3 +1204,69 @@ replace_exact("src/shell/focus/order.rs", """                WorkspaceDelta::Ges
                     (spring.value_at(Instant::now().duration_since(*start)) as f32).clamp(0.0, 1.0),
                 ),
 """, "")
+
+# ---------------------------------------------------------------------------
+# Tray popovers: windows of apps listed in ~/.config/cosmic-mac/tray-popovers
+# (default: Clippy) open like macOS menu-bar popovers. They float, sit just
+# below the top bar centered on the pointer (which is on the tray icon that was
+# just clicked), and always take keyboard focus. Stock COSMIC ignores where X11
+# apps ask to be placed, and Clippy hides itself the moment it lacks focus.
+replace_exact(SH, "#[derive(Debug)]\npub struct PendingWindow {", '''/// cosmic-mac: app ids (one per line, case-insensitive) whose windows open like
+/// macOS menu-bar popovers, from ~/.config/cosmic-mac/tray-popovers (read at login).
+static MAC_TRAY_POPOVERS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+    let path = format!("{}/.config/cosmic-mac/tray-popovers", std::env::var("HOME").unwrap_or_default());
+    match std::fs::read_to_string(path) {
+        Ok(text) => text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(str::to_lowercase)
+            .collect(),
+        Err(_) => vec!["clippy".to_string()],
+    }
+});
+
+fn mac_is_tray_popover(window: &CosmicSurface) -> bool {
+    let app_id = window.app_id().to_lowercase();
+    !app_id.is_empty() && MAC_TRAY_POPOVERS.iter().any(|a| *a == app_id)
+}
+
+/// Output-local spot for a tray popover: centered on the pointer, 6px below the top bar.
+fn mac_tray_popover_position(
+    seat: &Seat<State>,
+    output: &Output,
+    size: Size<i32, Logical>,
+) -> Option<Point<i32, Local>> {
+    let pointer = seat.get_pointer()?.current_location();
+    let output_loc = output.geometry().loc;
+    let zone = layer_map_for_output(output).non_exclusive_zone();
+    let x = (pointer.x as i32 - output_loc.x - size.w / 2)
+        .min(zone.loc.x + zone.size.w - size.w - 6)
+        .max(zone.loc.x + 6);
+    Some(Point::from((x, zone.loc.y + 6)))
+}
+
+#[derive(Debug)]
+pub struct PendingWindow {''')
+replace_exact(SH,
+    "        let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);\n",
+    "        let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);\n"
+    "        let mac_popover = mac_is_tray_popover(&window);\n")
+replace_exact(SH,
+    "            && !(workspace.is_tiled(&focused.active_window()) && floating_exception)\n",
+    "            && !(workspace.is_tiled(&focused.active_window()) && floating_exception)\n"
+    "            && !mac_popover\n")
+replace_exact(SH,
+    "        if is_dialog || floating_exception || !workspace.tiling_enabled {\n"
+    "            workspace.floating_layer.map(mapped.clone(), None);\n",
+    "        if is_dialog || floating_exception || mac_popover || !workspace.tiling_enabled {\n"
+    "            let position = mac_popover\n"
+    "                .then(|| mac_tray_popover_position(&seat, &workspace_output, mapped.geometry().size))\n"
+    "                .flatten();\n"
+    "            workspace.floating_layer.map(mapped.clone(), position);\n")
+replace_exact(SH,
+    "        } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)\n"
+    "            || should_be_sticky\n",
+    "        } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)\n"
+    "            || should_be_sticky\n"
+    "            || mac_popover\n")
