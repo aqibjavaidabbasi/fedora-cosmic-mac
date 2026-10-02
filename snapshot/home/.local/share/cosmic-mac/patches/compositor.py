@@ -43,16 +43,16 @@ static SPRING_DAMPING_CFG: std::sync::LazyLock<f64> =
 # 3. Three/four-finger swipe up opens the workspaces overview (Mission Control).
 patch("src/input/gestures/mod.rs", [
     (r"pub enum SwipeAction \{\n(\s*)NextWorkspace,\n\s*PrevWorkspace,\n\}",
-     "pub enum SwipeAction {\n\\1NextWorkspace,\n\\1PrevWorkspace,\n\\1Overview,\n}"),
+     "pub enum SwipeAction {\n\\1NextWorkspace,\n\\1PrevWorkspace,\n\\1Overview,\n\\1HideOverview,\n}"),
 ])
 patch("src/input/mod.rs", [
     # first "Other actions" arm = horizontal workspace layout
     (r"\n([ \t]*)_ => None, // TODO: Other actions\n",
-     "\n\\1Some(Direction::Up) => Some(SwipeAction::Overview),\n\\1_ => None, // TODO: Other actions\n"),
+     "\n\\1Some(Direction::Up) => Some(SwipeAction::Overview),\n\\1Some(Direction::Down) => Some(SwipeAction::HideOverview),\n\\1_ => None, // TODO: Other actions\n"),
 ])
 patch("src/input/actions.rs", [
     (r"(SwipeAction::PrevWorkspace => \{\n\s*let _ = to_previous_workspace\([^;]*;\n(\s*)\})",
-     "\\1\n\\2SwipeAction::Overview => {\n\\2    if let Some(command) = self.common.config.system_actions.get(&shortcuts::action::System::WorkspaceOverview) {\n\\2        self.spawn_command(command.clone());\n\\2    }\n\\2}"),
+     "\\1\n\\2SwipeAction::Overview => {\n\\2    if let Some(command) = self.common.config.system_actions.get(&shortcuts::action::System::WorkspaceOverview) {\n\\2        self.spawn_command(command.clone());\n\\2    }\n\\2}\n\\2SwipeAction::HideOverview => {\n\\2    // three fingers down closes the overview (a no-op when it is not open)\n\\2    self.spawn_command(\"busctl --user call com.system76.CosmicWorkspaces /com/system76/CosmicWorkspaces com.system76.CosmicWorkspaces Hide\".to_string());\n\\2}"),
 ])
 
 # 4. "Mac Spaces" (COSMIC_MAC_SPACES=1): no spare empty workspace at the end.

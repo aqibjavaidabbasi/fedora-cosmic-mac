@@ -82,10 +82,10 @@ index b8a7935..038294f 100644
          textures.swap(0, 1);
      }
 diff --git a/src/input/actions.rs b/src/input/actions.rs
-index 8639ba6..769fb8a 100644
+index 8639ba6..cff4f08 100644
 --- a/src/input/actions.rs
 +++ b/src/input/actions.rs
-@@ -141,6 +141,11 @@ impl State {
+@@ -141,6 +141,15 @@ impl State {
                      &mut self.common.workspace_state.update(),
                  );
              }
@@ -94,23 +94,28 @@ index 8639ba6..769fb8a 100644
 +                    self.spawn_command(command.clone());
 +                }
 +            }
++            SwipeAction::HideOverview => {
++                // three fingers down closes the overview (a no-op when it is not open)
++                self.spawn_command("busctl --user call com.system76.CosmicWorkspaces /com/system76/CosmicWorkspaces com.system76.CosmicWorkspaces Hide".to_string());
++            }
          }
      }
  
 diff --git a/src/input/gestures/mod.rs b/src/input/gestures/mod.rs
-index 6c9c2f3..6113887 100644
+index 6c9c2f3..4df5f19 100644
 --- a/src/input/gestures/mod.rs
 +++ b/src/input/gestures/mod.rs
-@@ -16,6 +16,7 @@ pub struct SwipeEvent {
+@@ -16,6 +16,8 @@ pub struct SwipeEvent {
  pub enum SwipeAction {
      NextWorkspace,
      PrevWorkspace,
 +    Overview,
++    HideOverview,
  }
  
  #[derive(Debug, Clone)]
 diff --git a/src/input/mod.rs b/src/input/mod.rs
-index 45586b0..8bcc0eb 100644
+index 45586b0..7293b01 100644
 --- a/src/input/mod.rs
 +++ b/src/input/mod.rs
 @@ -1193,8 +1193,7 @@ impl State {
@@ -123,11 +128,12 @@ index 45586b0..8bcc0eb 100644
                                      if self.common.config.cosmic_conf.workspaces.workspace_layout
                                          == WorkspaceLayout::Horizontal
                                      {
-@@ -1213,6 +1212,7 @@ impl State {
+@@ -1213,6 +1212,8 @@ impl State {
                                                      Some(SwipeAction::NextWorkspace)
                                                  }
                                              }
 +                                            Some(Direction::Up) => Some(SwipeAction::Overview),
++                                            Some(Direction::Down) => Some(SwipeAction::HideOverview),
                                              _ => None, // TODO: Other actions
                                          }
                                      } else {
