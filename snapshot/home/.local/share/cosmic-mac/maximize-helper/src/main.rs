@@ -104,6 +104,8 @@ struct App {
     /// Waiting for a workspace we asked COSMIC to create (Mac Spaces mode).
     pending_new: Option<PendingNew>,
     ready: bool,
+    /// Native Spaces are on: the compositor places windows; skip this helper's workspace policy.
+    native_spaces: bool,
     qh: QueueHandle<App>,
     /// Memory for the in-flight capture. Kept here, not in the frame's Wayland
     /// user data: freeing it sends a Wayland request, which deadlocks if it
@@ -132,6 +134,26 @@ fn is_big(info: &ToplevelInfo) -> bool {
 
 fn home() -> String {
     std::env::var("HOME").unwrap_or_default()
+}
+
+/// `COSMIC_MAC_NATIVE_SPACES` from `animation.conf` text (shell `KEY=value` lines). On only when
+/// the value is exactly `1`, the same rule as the compositor.
+fn native_spaces_in(conf: &str) -> bool {
+    conf.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| l.strip_prefix("export ").unwrap_or(l).split_once('='))
+        .filter(|(k, _)| k.trim() == "COSMIC_MAC_NATIVE_SPACES")
+        .last()
+        .is_some_and(|(_, v)| v.trim().trim_matches(|c| c == '"' || c == '\'').trim() == "1")
+}
+
+/// Native Spaces (B3): the compositor owns workspace placement, so this helper only does
+/// presentation. Read once at start, like the compositor reads it at login.
+fn native_spaces() -> bool {
+    fs::read_to_string(format!("{}/.config/cosmic-mac/animation.conf", home()))
+        .map(|c| native_spaces_in(&c))
+        .unwrap_or(false)
 }
 
 fn cosmic_dir(id: &str) -> String {
@@ -454,7 +476,7 @@ impl App {
         }
         tracked.big = big;
 
-        if !self.ready {
+        if !self.ready || self.native_spaces {
             return;
         }
         if big == was_big {
@@ -1037,7 +1059,8 @@ impl ToplevelInfoHandler for App {
         let tracked = self.tracked.remove(toplevel);
         if let Some(info) = self.toplevel_info_state.info(toplevel).cloned() {
             // Closing a full-screen app returns to that display's desktop, like macOS.
-            if tracked.is_some_and(|t| t.big) {
+            // (Not with native Spaces: the compositor owns that.)
+            if !self.native_spaces && tracked.is_some_and(|t| t.big) {
                 if let Some(ws) = info.workspace.iter().next() {
                     if self.is_active(ws) && self.others_on(ws, toplevel) == 0 {
                         if let Some(desktop) = self.desktop_of(ws) {
@@ -1147,6 +1170,7 @@ fn main() {
         unpin_requested: HashSet::new(),
         pending_new: None,
         ready: false,
+        native_spaces: native_spaces(),
         qh: qh.clone(),
         capture_pool: None,
         capture: None,
@@ -1183,3 +1207,22 @@ cosmic_client_toolkit::delegate_toplevel_manager!(App);
 cosmic_client_toolkit::delegate_workspace!(App);
 cosmic_client_toolkit::delegate_screencopy!(App);
 delegate_noop!(App: ignore wl_buffer::WlBuffer);
+
+#[cfg(test)]
+mod tests {
+    use super::native_spaces_in;
+
+    #[test]
+    fn native_spaces_switch_in_animation_conf() {
+        assert!(!native_spaces_in(""));
+        assert!(!native_spaces_in("COSMIC_MAC_SPACES=1\n"));
+        assert!(native_spaces_in("COSMIC_MAC_NATIVE_SPACES=1\n"));
+        assert!(native_spaces_in("  export COSMIC_MAC_NATIVE_SPACES=\"1\"  \n"));
+        assert!(!native_spaces_in("# COSMIC_MAC_NATIVE_SPACES=1\n"));
+        assert!(!native_spaces_in("COSMIC_MAC_NATIVE_SPACES=0\n"));
+        assert!(!native_spaces_in("COSMIC_MAC_NATIVE_SPACES=true\n"));
+        // the last assignment wins, as in the shell
+        assert!(!native_spaces_in("COSMIC_MAC_NATIVE_SPACES=1\nCOSMIC_MAC_NATIVE_SPACES=0\n"));
+        assert!(native_spaces_in("COSMIC_MAC_NATIVE_SPACES=0\nCOSMIC_MAC_NATIVE_SPACES=1\n"));
+    }
+}

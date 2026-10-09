@@ -28,7 +28,7 @@ cosmic-workspaces-1.8.0-1.fc44.x86_64
 com.dec05eba.gpu_screen_recorder	6.1.2	flathub
 com.github.codevardhan.caffeine-applet	0.1.0	cosmic
 io.github.cosmic_utils.minimon-applet	1.2.0	cosmic
-io.github.marcelogomes90.cosmic-ext-applet-status-hub	1.5.12	cosmic
+io.github.marcelogomes90.cosmic-ext-applet-status-hub	1.5.13	cosmic
 
 # Third-party themes in ~/.local/share/icons (not stored here; install.sh downloads them)
 MacTahoe, MacTahoe-dark, MacTahoe-light  https://github.com/vinceliuice/MacTahoe-icon-theme

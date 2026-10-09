@@ -267,6 +267,10 @@ c.execute("update settings set position='center' where position='cursor'")
 c.commit()
 PY
 
+# Apps whose windows open like macOS menu-bar popovers: the patched compositor puts them
+# just under the top bar at the clicked tray icon and gives them keyboard focus.
+[ -f ~/.config/cosmic-mac/tray-popovers ] || printf '# Apps whose windows open under their tray icon like macOS popovers (one app id per line)\nclippy\n' > ~/.config/cosmic-mac/tray-popovers
+
 # --- Files (Nautilus): System Settings style sidebar (kept by cosmic-mac-gtk-css.path)
 "$HOME/.local/share/cosmic-mac/gtk-css.sh"
 

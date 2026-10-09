@@ -1423,3 +1423,352 @@ replace_exact(SH,
     "                for (set, before) in self.sets.values_mut().zip(befores.iter()) {\n"
     "                    set.remap_transition(before);\n"
     "                }\n")
+
+# ---------------------------------------------------------------------------
+# Stage B3.2 (behavior-neutral): infrastructure for compositor-native Spaces. A Space-owner
+# marker on `Workspace` (a weak window handle, so it never keeps a closed window alive and moves
+# with the workspace between outputs), the COSMIC_MAC_NATIVE_SPACES switch (default off), the
+# intent queue type, and refresh-time marker validation. Nothing sets a marker, records an
+# intent or reads the switch for a decision yet, so behavior is unchanged with the switch on.
+WS = "src/shell/workspace.rs"
+replace_exact(WS,
+    "    pub(super) backdrop_id: Id,\n    pub dirty: AtomicBool,\n}\n",
+    "    pub(super) backdrop_id: Id,\n    pub dirty: AtomicBool,\n"
+    "    /// cosmic-mac B3: the window this workspace is the dedicated Space of (native Spaces).\n"
+    "    /// Weak, so it never keeps a closed window alive; validated every refresh\n"
+    "    /// (`Workspaces::mac_validate_space_owners`). Not set by anything yet.\n"
+    "    pub mac_space_owner: Option<crate::shell::element::surface::WeakCosmicSurface>,\n"
+    "}\n")
+replace_exact(WS,
+    "            backdrop_id: Id::new(),\n            dirty: AtomicBool::new(false),\n        }\n",
+    "            backdrop_id: Id::new(),\n            dirty: AtomicBool::new(false),\n"
+    "            mac_space_owner: None,\n        }\n",
+    count=2)
+replace_exact(WS,
+    "    pub fn can_auto_remove(",
+    "    /// cosmic-mac B3.2: this workspace as a `mac_spaces` snapshot entry. Windows get ids by\n"
+    "    /// identity through `ids`; a Space owner that no longer exists gets an id no window has.\n"
+    "    /// `recently_created` is filled in by the workspace set.\n"
+    "    pub fn mac_space_info(\n"
+    "        &self,\n"
+    "        ids: &mut crate::shell::mac_spaces::IdentityMap<CosmicSurface>,\n"
+    "        xdg_activation_state: &XdgActivationState,\n"
+    "    ) -> crate::shell::mac_spaces::WorkspaceInfo {\n"
+    "        use crate::shell::mac_spaces::{WindowInfo, WindowState, WorkspaceInfo};\n"
+    "        let mut windows = Vec::new();\n"
+    "        for mapped in self.mapped() {\n"
+    "            let maximized = mapped.maximized_state.lock().unwrap().is_some();\n"
+    "            for (surface, _) in mapped.windows() {\n"
+    "                windows.push(WindowInfo {\n"
+    "                    id: ids.id_of(&surface),\n"
+    "                    state: WindowState { maximized, fullscreen: false, minimized: false },\n"
+    "                });\n"
+    "            }\n"
+    "        }\n"
+    "        for minimized in &self.minimized_windows {\n"
+    "            for surface in minimized.windows() {\n"
+    "                windows.push(WindowInfo {\n"
+    "                    id: ids.id_of(&surface),\n"
+    "                    state: WindowState { maximized: false, fullscreen: false, minimized: true },\n"
+    "                });\n"
+    "            }\n"
+    "        }\n"
+    "        for fullscreen in self.get_fullscreen_surfaces() {\n"
+    "            windows.push(WindowInfo {\n"
+    "                id: ids.id_of(&fullscreen.surface),\n"
+    "                state: WindowState { maximized: false, fullscreen: true, minimized: false },\n"
+    "            });\n"
+    "        }\n"
+    "        let space_owner = self.mac_space_owner.as_ref().map(|owner| match owner.upgrade() {\n"
+    "            Some(surface) if surface.alive() => ids.id_of(&surface),\n"
+    "            _ => ids.absent(),\n"
+    "        });\n"
+    "        WorkspaceInfo {\n"
+    "            pinned: self.pinned,\n"
+    "            windows,\n"
+    "            has_activation_token: self.has_activation_token(xdg_activation_state),\n"
+    "            recently_created: false,\n"
+    "            space_owner,\n"
+    "            tiling_enabled: self.tiling_enabled,\n"
+    "        }\n"
+    "    }\n"
+    "\n"
+    "    pub fn can_auto_remove(")
+# switch
+replace_exact(SH,
+    "    std::sync::LazyLock::new(Default::default);\nconst MOVE_GRAB_Y_OFFSET",
+    "    std::sync::LazyLock::new(Default::default);\n"
+    "/// cosmic-mac B3.2: native Spaces, `COSMIC_MAC_NATIVE_SPACES=1` (default off), read once like the\n"
+    "/// other COSMIC_MAC_* settings. Only gates the (still unused) intent queue.\n"
+    "static MAC_NATIVE_SPACES: std::sync::LazyLock<mac_spaces::NativeSpacesConfig> =\n"
+    "    std::sync::LazyLock::new(|| {\n"
+    "        mac_spaces::NativeSpacesConfig::b3(mac_spaces::native_spaces_switch(\n"
+    "            std::env::var(\"COSMIC_MAC_NATIVE_SPACES\").ok().as_deref(),\n"
+    "        ))\n"
+    "    });\n"
+    "\n"
+    "/// cosmic-mac B3.2: the native Spaces configuration of this session.\n"
+    "pub fn mac_native_spaces_config() -> mac_spaces::NativeSpacesConfig {\n"
+    "    *MAC_NATIVE_SPACES\n"
+    "}\n"
+    "\n"
+    "/// cosmic-mac B3.2: a native Spaces intent, identifying the window weakly.\n"
+    "pub type MacSpacesIntent = mac_spaces::NativeIntent<crate::shell::element::surface::WeakCosmicSurface>;\n"
+    "const MOVE_GRAB_Y_OFFSET")
+# intent queue on Shell
+replace_exact(SH,
+    "    pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,\n",
+    "    pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,\n"
+    "    /// cosmic-mac B3.2: native Spaces intents, to be recorded at maximize/unmaximize request\n"
+    "    /// entry points and drained once per event-loop iteration (B3.3). Nothing records any yet.\n"
+    "    pub mac_spaces_intents: mac_spaces::IntentQueue<crate::shell::element::surface::WeakCosmicSurface>,\n")
+replace_exact(SH,
+    "            previous_workspace_idx: None,\n",
+    "            previous_workspace_idx: None,\n"
+    "            mac_spaces_intents: Default::default(),\n")
+replace_exact(SH,
+    "    pub fn mac_create_workspace(\n",
+    "    /// cosmic-mac B3.2: record a native Spaces intent. Rejected (returns false) unless native\n"
+    "    /// Spaces are on, the kind is enabled and it is a real intent, never an internal change.\n"
+    "    /// Not called yet.\n"
+    "    pub fn mac_spaces_record(&mut self, intent: MacSpacesIntent) -> bool {\n"
+    "        self.mac_spaces_intents.push(&MAC_NATIVE_SPACES, intent)\n"
+    "    }\n"
+    "\n"
+    "    /// cosmic-mac B3.2: take the recorded intents (B3.3 drains these). Not called yet.\n"
+    "    pub fn mac_spaces_take_intents(&mut self) -> Vec<MacSpacesIntent> {\n"
+    "        self.mac_spaces_intents.drain()\n"
+    "    }\n"
+    "\n"
+    "    pub fn mac_create_workspace(\n")
+# snapshot of a set
+replace_exact(SH,
+    "    /// The handles of this set's workspaces, in order (Stage B2).\n",
+    "    /// cosmic-mac B3.2: this output's workspaces as a `mac_spaces` snapshot, with the identity\n"
+    "    /// map that turns its window ids back into windows. Its indices are only valid until the\n"
+    "    /// workspace list changes; resolve them in the same call.\n"
+    "    pub fn mac_spaces_snapshot(\n"
+    "        &self,\n"
+    "        xdg_activation_state: &XdgActivationState,\n"
+    "    ) -> (mac_spaces::OutputSnapshot, mac_spaces::IdentityMap<CosmicSurface>) {\n"
+    "        let mut ids = mac_spaces::IdentityMap::default();\n"
+    "        let now = Instant::now();\n"
+    "        let recent = MAC_RECENT.lock().unwrap();\n"
+    "        let workspaces = self\n"
+    "            .workspaces\n"
+    "            .iter()\n"
+    "            .map(|w| {\n"
+    "                let mut info = w.mac_space_info(&mut ids, xdg_activation_state);\n"
+    "                info.recently_created = recent\n"
+    "                    .get(&w.handle)\n"
+    "                    .is_some_and(|t| now.duration_since(*t) < Duration::from_secs(3));\n"
+    "                info\n"
+    "            })\n"
+    "            .collect();\n"
+    "        (\n"
+    "            mac_spaces::OutputSnapshot {\n"
+    "                workspaces,\n"
+    "                active: self.active,\n"
+    "            },\n"
+    "            ids,\n"
+    "        )\n"
+    "    }\n"
+    "\n"
+    "    /// The handles of this set's workspaces, in order (Stage B2).\n")
+# validation over all sets
+replace_exact(SH,
+    "    pub fn recalculate(&mut self) {\n",
+    "    /// cosmic-mac B3.2: clear every Space-owner marker whose owner closed, left that workspace,\n"
+    "    /// is marked twice, or sits on a desktop (`mac_spaces::native_markers_to_clear`). Sets\n"
+    "    /// without markers are skipped, so this is a no-op until B3.3 sets markers.\n"
+    "    pub fn mac_validate_space_owners(&mut self, xdg_activation_state: &XdgActivationState) {\n"
+    "        for set in self.sets.values_mut() {\n"
+    "            if set.workspaces.iter().all(|w| w.mac_space_owner.is_none()) {\n"
+    "                continue;\n"
+    "            }\n"
+    "            let (snapshot, _) = set.mac_spaces_snapshot(xdg_activation_state);\n"
+    "            for idx in mac_spaces::native_markers_to_clear(&snapshot) {\n"
+    "                if let Some(workspace) = set.workspaces.get_mut(idx) {\n"
+    "                    workspace.mac_space_owner = None;\n"
+    "                }\n"
+    "            }\n"
+    "        }\n"
+    "    }\n"
+    "\n"
+    "    pub fn recalculate(&mut self) {\n")
+replace_exact(SH,
+    "        self.workspaces\n            .refresh(workspace_state, xdg_activation_state);\n",
+    "        self.workspaces.mac_validate_space_owners(xdg_activation_state);\n"
+    "        self.workspaces\n            .refresh(workspace_state, xdg_activation_state);\n")
+
+# ---------------------------------------------------------------------------
+# Stage B3.3: native Spaces, maximize -> own Space (COSMIC_MAC_NATIVE_SPACES=1, default off).
+# Explicit maximize requests (xdg, X11, toplevel-management, maximize_toggle, and a window that
+# maps after asking to be maximized) keep COSMIC's normal maximize and additionally record an
+# intent. Internal maximize/unmaximize paths record nothing. The queue is drained at the start
+# of every event-loop refresh, before workspaces are refreshed/pruned: an eligible window gets a
+# newly appended workspace, is moved there with `move_window` (which keeps it maximized), the
+# workspace is marked as its Space, and it is activated unless a gesture is tracking. With the
+# switch off the queue never accepts anything, so nothing changes.
+replace_exact("src/wayland/handlers/xdg_shell/mod.rs",
+    "            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle)\n",
+    "            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);\n"
+    "            shell.mac_spaces_maximize_requested(\n"
+    "                &mapped,\n"
+    "                crate::shell::mac_spaces::MaximizeSource::XdgRequest,\n"
+    "            );\n")
+replace_exact("src/xwayland.rs",
+    "            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);\n",
+    "            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);\n"
+    "            shell.mac_spaces_maximize_requested(\n"
+    "                &mapped,\n"
+    "                crate::shell::mac_spaces::MaximizeSource::X11Request,\n"
+    "            );\n")
+replace_exact("src/wayland/handlers/toplevel_management.rs",
+    "            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);\n",
+    "            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);\n"
+    "            shell.mac_spaces_maximize_requested(\n"
+    "                &mapped,\n"
+    "                crate::shell::mac_spaces::MaximizeSource::ToplevelManagement,\n"
+    "            );\n")
+replace_exact(SH,
+    "            self.maximize_request(window, seat, true, loop_handle);\n",
+    "            self.maximize_request(window, seat, true, loop_handle);\n"
+    "            self.mac_spaces_maximize_requested(window, mac_spaces::MaximizeSource::UserToggle);\n")
+replace_exact(SH,
+    "        if should_be_maximized {\n            self.maximize_request(&mapped, &seat, false, loop_handle);\n        }\n",
+    "        if should_be_maximized {\n            self.maximize_request(&mapped, &seat, false, loop_handle);\n"
+    "            self.mac_spaces_maximize_requested(\n"
+    "                &mapped,\n"
+    "                mac_spaces::MaximizeSource::MapRequestedMaximized,\n"
+    "            );\n"
+    "        }\n")
+replace_exact(SH,
+    "    pub fn mac_create_workspace(\n",
+    "    /// cosmic-mac B3.3: an explicit maximize request for `mapped` from `source`. COSMIC's own\n"
+    "    /// maximize has already been applied; this only records the native Spaces intent (refused\n"
+    "    /// unless native Spaces are on and `source` is an intent).\n"
+    "    pub fn mac_spaces_maximize_requested(\n"
+    "        &mut self,\n"
+    "        mapped: &CosmicMapped,\n"
+    "        source: mac_spaces::MaximizeSource,\n"
+    "    ) {\n"
+    "        let intent = source.intent(mapped.active_window().downgrade());\n"
+    "        self.mac_spaces_record(intent);\n"
+    "    }\n"
+    "\n"
+    "    /// cosmic-mac B3.3: act on the recorded native Spaces intents, oldest first, each once.\n"
+    "    /// Called at the start of every event-loop refresh, before workspaces are refreshed and\n"
+    "    /// pruned, so a new Space is never empty when pruning runs.\n"
+    "    pub fn mac_spaces_drain(state: &mut State) {\n"
+    "        let intents = state.common.shell.write().mac_spaces_take_intents();\n"
+    "        if intents.is_empty() {\n"
+    "            return;\n"
+    "        }\n"
+    "        let config = mac_native_spaces_config();\n"
+    "        for intent in intents {\n"
+    "            let focus = {\n"
+    "                let mut shell = state.common.shell.write();\n"
+    "                shell.mac_spaces_apply_maximize(\n"
+    "                    &intent,\n"
+    "                    &config,\n"
+    "                    &state.common.xdg_activation_state,\n"
+    "                    &mut state.common.workspace_state.update(),\n"
+    "                    &state.common.event_loop_handle,\n"
+    "                )\n"
+    "            };\n"
+    "            if let Some((target, seat)) = focus {\n"
+    "                Shell::set_focus(state, Some(&target), &seat, None, true);\n"
+    "            }\n"
+    "        }\n"
+    "    }\n"
+    "\n"
+    "    /// cosmic-mac B3.3: one maximize intent. Skips (leaving COSMIC's normal maximize as it is)\n"
+    "    /// unless `mac_spaces::native_maximize_plan` says to create a Space. Then: append a\n"
+    "    /// workspace to the window's output, move the window there (`move_window` keeps it\n"
+    "    /// maximized), mark the workspace as its Space by window identity, and activate it unless\n"
+    "    /// a gesture is tracking. Returns the focus to give when the Space was activated.\n"
+    "    fn mac_spaces_apply_maximize(\n"
+    "        &mut self,\n"
+    "        intent: &MacSpacesIntent,\n"
+    "        config: &mac_spaces::NativeSpacesConfig,\n"
+    "        xdg_activation_state: &XdgActivationState,\n"
+    "        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,\n"
+    "        evlh: &LoopHandle<'static, State>,\n"
+    "    ) -> Option<(KeyboardFocusTarget, Seat<State>)> {\n"
+    "        if intent.kind != mac_spaces::BigKind::Maximize\n"
+    "            || intent.change != mac_spaces::IntentChange::BecomeBig\n"
+    "        {\n"
+    "            return None;\n"
+    "        }\n"
+    "        let surface = intent.window.upgrade().filter(|s| s.alive())?;\n"
+    "        let mapped = self.element_for_surface(&surface).cloned()?;\n"
+    "        // the window's workspace, by identity (sticky windows are in no workspace: skipped)\n"
+    "        let (output, idx) = self.workspaces.sets.iter().find_map(|(output, set)| {\n"
+    "            set.workspaces\n"
+    "                .iter()\n"
+    "                .position(|w| w.mapped().any(|m| m == &mapped))\n"
+    "                .map(|idx| (output.clone(), idx))\n"
+    "        })?;\n"
+    "        let set = self.workspaces.sets.get(&output)?;\n"
+    "        let from = set.workspaces[idx].handle;\n"
+    "        let (snapshot, mut ids) = set.mac_spaces_snapshot(xdg_activation_state);\n"
+    "        let window_id = ids.id_of(&surface);\n"
+    "        let ctx = mac_spaces::MaximizeContext {\n"
+    "            gesture_tracking: set.transition.is_tracking(),\n"
+    "            new_space_tiling: set.tiling_enabled,\n"
+    "            movable: !mapped.is_stack() && !mapped.is_minimized() && !surface.is_fullscreen(true),\n"
+    "        };\n"
+    "        let mac_spaces::MaximizePlan::CreateSpace { activate } =\n"
+    "            mac_spaces::native_maximize_plan(&snapshot, config, idx, window_id, intent.origin, ctx)\n"
+    "        else {\n"
+    "            return None;\n"
+    "        };\n"
+    "\n"
+    "        // always a new workspace, appended (indices of existing workspaces do not change)\n"
+    "        let set = self.workspaces.sets.get_mut(&output)?;\n"
+    "        set.add_empty_workspace(workspace_state);\n"
+    "        let to = set.workspaces.last()?.handle;\n"
+    "        let seat = self.seats.last_active().clone();\n"
+    "        let _ = self.move_window(\n"
+    "            Some(&seat),\n"
+    "            &surface,\n"
+    "            &from,\n"
+    "            &to,\n"
+    "            false,\n"
+    "            None,\n"
+    "            workspace_state,\n"
+    "            evlh,\n"
+    "        );\n"
+    "        let moved = self.workspaces.space_for_handle(&to).is_some_and(|w| {\n"
+    "            w.mapped()\n"
+    "                .any(|m| m.windows().any(|(s, _)| s == surface))\n"
+    "        });\n"
+    "        if !moved {\n"
+    "            // nothing moved: the empty workspace is pruned at the next refresh (not active)\n"
+    "            return None;\n"
+    "        }\n"
+    "        if let Some(space) = self.workspaces.space_for_handle_mut(&to) {\n"
+    "            space.mac_space_owner = Some(surface.downgrade());\n"
+    "        }\n"
+    "        let new_mapped = self.element_for_surface(&surface).cloned()?;\n"
+    "        if new_mapped.maximized_state.lock().unwrap().is_none() {\n"
+    "            // MaximizeSource::NativeSpaces: internal, records no intent\n"
+    "            self.maximize_request(&new_mapped, &seat, false, evlh);\n"
+    "        }\n"
+    "        if activate != mac_spaces::Activation::Now {\n"
+    "            return None;\n"
+    "        }\n"
+    "        let new_idx = self.workspaces.idx_for_handle(&output, &to)?;\n"
+    "        self.activate(&output, new_idx, WorkspaceDelta::new_shortcut(), workspace_state)\n"
+    "            .ok()?;\n"
+    "        Some((KeyboardFocusTarget::Element(new_mapped), seat))\n"
+    "    }\n"
+    "\n"
+    "    pub fn mac_create_workspace(\n")
+replace_exact("src/lib.rs",
+    "fn refresh(state: &mut State) {\n",
+    "fn refresh(state: &mut State) {\n"
+    "    // cosmic-mac B3.3: native Spaces intents, every pass, before anything is refreshed/pruned\n"
+    "    crate::shell::Shell::mac_spaces_drain(state);\n"
+    "\n")
