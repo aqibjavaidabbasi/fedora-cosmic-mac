@@ -543,7 +543,7 @@ index 6c9c2f3..a33ba32 100644
  
  // rubber_band.rs from Niri (GPL-3.0) https://github.com/YaLTeR/niri/blob/db49deb7fd2fbe805ceec060aa4dec65009ad7a7/src/rubber_band.rs
 diff --git a/src/input/mod.rs b/src/input/mod.rs
-index 45586b0..16f1f83 100644
+index af160ae..3074a57 100644
 --- a/src/input/mod.rs
 +++ b/src/input/mod.rs
 @@ -10,7 +10,11 @@ use crate::{
@@ -740,7 +740,7 @@ index 45586b0..16f1f83 100644
                  }
              }
              InputEvent::GesturePinchBegin { event, .. } => {
-@@ -2741,12 +2670,7 @@ impl State {
+@@ -2754,12 +2683,7 @@ impl State {
          shell: &Shell,
          seat: &Seat<State>,
      ) -> Option<KeyboardFocusTarget> {
@@ -754,7 +754,7 @@ index 45586b0..16f1f83 100644
          let element_filter = if workspace_overview_is_open(output) {
              ElementFilter::LayerShellOnly
          } else {
-@@ -2869,12 +2793,7 @@ impl State {
+@@ -2882,12 +2806,7 @@ impl State {
          output: &Output,
          shell: &Shell,
      ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
@@ -768,6 +768,20 @@ index 45586b0..16f1f83 100644
  
          let element_filter = if workspace_overview_is_open(output) {
              ElementFilter::LayerShellOnly
+diff --git a/src/lib.rs b/src/lib.rs
+index 98bfa2a..498cf54 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -338,6 +338,9 @@ fn init_wayland_display(
+ }
+ 
+ fn refresh(state: &mut State) {
++    // cosmic-mac B3.3: native Spaces intents, every pass, before anything is refreshed/pruned
++    crate::shell::Shell::mac_spaces_drain(state);
++
+     if matches!(state.last_refresh, LastRefresh::Scheduled(_)) {
+         return;
+     }
 diff --git a/src/shell/element/surface.rs b/src/shell/element/surface.rs
 index a7fd922..6479d12 100644
 --- a/src/shell/element/surface.rs
@@ -888,10 +902,10 @@ index fa4a187..7d33adc 100644
  }
  
 diff --git a/src/shell/focus/order.rs b/src/shell/focus/order.rs
-index fb904c0..fbbd97c 100644
+index 937fa31..64d07e6 100644
 --- a/src/shell/focus/order.rs
 +++ b/src/shell/focus/order.rs
-@@ -168,14 +168,6 @@ fn render_input_order_internal<R: 'static>(
+@@ -255,14 +255,6 @@ fn render_input_order_internal<R: 'static>(
                      percentage: prog,
                      forward,
                  } => (*forward, *prog as f32),
@@ -907,10 +921,10 @@ index fb904c0..fbbd97c 100644
  
              let offset = Point::<i32, Logical>::from(match (layout, forward) {
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 47d7885..5588133 100644
+index 8439b13..b603058 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
-@@ -73,7 +73,8 @@ use smithay::{
+@@ -76,7 +76,8 @@ use smithay::{
  use tracing::error;
  
  use crate::{
@@ -920,15 +934,16 @@ index 47d7885..5588133 100644
      config::Config,
      utils::{prelude::*, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
      wayland::{
-@@ -96,6 +97,7 @@ use crate::{
+@@ -99,6 +100,8 @@ use crate::{
  pub mod element;
  pub mod focus;
  pub mod grabs;
 +pub mod workspace_transition;
++pub mod mac_spaces;
  pub mod layout;
  mod seats;
  mod workspace;
-@@ -122,9 +124,20 @@ use self::{
+@@ -125,9 +128,36 @@ use self::{
  };
  
  const ANIMATION_DURATION: Duration = Duration::from_millis(200);
@@ -949,10 +964,26 @@ index 47d7885..5588133 100644
 +    std::sync::LazyLock::new(|| std::env::var("COSMIC_MAC_SPACES").is_ok_and(|v| v.trim() == "1"));
 +static MAC_RECENT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<WorkspaceHandle, Instant>>> =
 +    std::sync::LazyLock::new(Default::default);
++/// cosmic-mac B3.2: native Spaces, `COSMIC_MAC_NATIVE_SPACES=1` (default off), read once like the
++/// other COSMIC_MAC_* settings. Only gates the (still unused) intent queue.
++static MAC_NATIVE_SPACES: std::sync::LazyLock<mac_spaces::NativeSpacesConfig> =
++    std::sync::LazyLock::new(|| {
++        mac_spaces::NativeSpacesConfig::b3(mac_spaces::native_spaces_switch(
++            std::env::var("COSMIC_MAC_NATIVE_SPACES").ok().as_deref(),
++        ))
++    });
++
++/// cosmic-mac B3.2: the native Spaces configuration of this session.
++pub fn mac_native_spaces_config() -> mac_spaces::NativeSpacesConfig {
++    *MAC_NATIVE_SPACES
++}
++
++/// cosmic-mac B3.2: a native Spaces intent, identifying the window weakly.
++pub type MacSpacesIntent = mac_spaces::NativeIntent<crate::shell::element::surface::WeakCosmicSurface>;
  const MOVE_GRAB_Y_OFFSET: f64 = 16.;
  const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
  
-@@ -254,6 +267,41 @@ impl From<&CosmicSurface> for ActivationKey {
+@@ -257,6 +287,41 @@ impl From<&CosmicSurface> for ActivationKey {
      }
  }
  
@@ -994,7 +1025,17 @@ index 47d7885..5588133 100644
  #[derive(Debug)]
  pub struct PendingWindow {
      pub surface: CosmicSurface,
-@@ -315,57 +363,23 @@ pub struct SessionLock {
+@@ -286,6 +351,9 @@ pub struct Shell {
+     pub session_lock: Option<SessionLock>,
+     pub seats: Seats,
+     pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
++    /// cosmic-mac B3.2: native Spaces intents, to be recorded at maximize/unmaximize request
++    /// entry points and drained once per event-loop iteration (B3.3). Nothing records any yet.
++    pub mac_spaces_intents: mac_spaces::IntentQueue<crate::shell::element::surface::WeakCosmicSurface>,
+     pub xwayland_keyboard_grab: Option<XWaylandKeyboardGrab<State>>,
+ 
+     theme: cosmic::Theme,
+@@ -318,57 +386,23 @@ pub struct SessionLock {
  
  #[derive(Debug, Clone, Copy)]
  pub enum WorkspaceDelta {
@@ -1058,7 +1099,7 @@ index 47d7885..5588133 100644
      pub active: usize,
      pub group: WorkspaceGroupHandle,
      tiling_enabled: bool,
-@@ -500,7 +514,7 @@ impl WorkspaceSet {
+@@ -503,7 +537,7 @@ impl WorkspaceSet {
          let sticky_layer = FloatingLayout::new(theme.clone(), appearance, output);
  
          WorkspaceSet {
@@ -1067,7 +1108,7 @@ index 47d7885..5588133 100644
              active: 0,
              group: group_handle,
              tiling_enabled,
-@@ -513,10 +527,29 @@ impl WorkspaceSet {
+@@ -516,10 +550,29 @@ impl WorkspaceSet {
          }
      }
  
@@ -1098,7 +1139,7 @@ index 47d7885..5588133 100644
          state: &mut WorkspaceUpdateGuard<'_, State>,
      ) -> Result<bool, InvalidWorkspaceIndex> {
          if idx >= self.workspaces.len() {
-@@ -524,64 +557,123 @@ impl WorkspaceSet {
+@@ -527,64 +580,123 @@ impl WorkspaceSet {
          }
  
          // Animate if workspaces overview isn't open
@@ -1263,7 +1304,7 @@ index 47d7885..5588133 100644
      fn set_output(&mut self, new_output: &Output, explicit: bool) {
          self.sticky_layer.set_output(new_output);
          for window in self.sticky_layer.windows() {
-@@ -595,25 +687,9 @@ impl WorkspaceSet {
+@@ -598,25 +710,9 @@ impl WorkspaceSet {
      }
  
      fn refresh(&mut self) {
@@ -1292,7 +1333,7 @@ index 47d7885..5588133 100644
              self.workspaces[self.active].refresh();
          }
          self.sticky_layer.refresh();
-@@ -644,6 +720,10 @@ impl WorkspaceSet {
+@@ -647,6 +743,11 @@ impl WorkspaceSet {
          state: &mut WorkspaceUpdateGuard<State>,
          xdg_activation_state: &XdgActivationState,
      ) {
@@ -1300,13 +1341,17 @@ index 47d7885..5588133 100644
 +            self.mac_prune(state, xdg_activation_state);
 +            return;
 +        }
++        let before = self.workspace_handles();
          // add empty at the end, if necessary
          if self
              .workspaces
-@@ -693,6 +773,47 @@ impl WorkspaceSet {
+@@ -694,6 +795,50 @@ impl WorkspaceSet {
+         if kept.iter().any(|val| !(*val)) {
+             self.update_workspace_idxs(state);
          }
-     }
- 
++        self.remap_transition(&before);
++    }
++
 +    fn mac_prune(
 +        &mut self,
 +        state: &mut WorkspaceUpdateGuard<State>,
@@ -1316,6 +1361,7 @@ index 47d7885..5588133 100644
 +            self.add_empty_workspace(state);
 +            return;
 +        }
++        let before = self.workspace_handles();
 +        let now = Instant::now();
 +        let recent = MAC_RECENT.lock().unwrap().clone();
 +        let kept: Vec<bool> = self
@@ -1346,12 +1392,190 @@ index 47d7885..5588133 100644
 +        if kept.iter().any(|val| !(*val)) {
 +            self.update_workspace_idxs(state);
 +        }
++        self.remap_transition(&before);
+     }
+ 
+     fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
+@@ -707,6 +852,51 @@ impl WorkspaceSet {
+         }
+     }
+ 
++    /// cosmic-mac B3.2: this output's workspaces as a `mac_spaces` snapshot, with the identity
++    /// map that turns its window ids back into windows. Its indices are only valid until the
++    /// workspace list changes; resolve them in the same call.
++    pub fn mac_spaces_snapshot(
++        &self,
++        xdg_activation_state: &XdgActivationState,
++    ) -> (mac_spaces::OutputSnapshot, mac_spaces::IdentityMap<CosmicSurface>) {
++        let mut ids = mac_spaces::IdentityMap::default();
++        let now = Instant::now();
++        let recent = MAC_RECENT.lock().unwrap();
++        let workspaces = self
++            .workspaces
++            .iter()
++            .map(|w| {
++                let mut info = w.mac_space_info(&mut ids, xdg_activation_state);
++                info.recently_created = recent
++                    .get(&w.handle)
++                    .is_some_and(|t| now.duration_since(*t) < Duration::from_secs(3));
++                info
++            })
++            .collect();
++        (
++            mac_spaces::OutputSnapshot {
++                workspaces,
++                active: self.active,
++            },
++            ids,
++        )
 +    }
 +
-     fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
-         for (i, workspace) in self.workspaces.iter().enumerate() {
-             workspace_set_idx(
-@@ -1346,14 +1467,31 @@ impl Workspaces {
++    /// The handles of this set's workspaces, in order (Stage B2).
++    fn workspace_handles(&self) -> Vec<WorkspaceHandle> {
++        self.workspaces.iter().map(|w| w.handle).collect()
++    }
++
++    /// Stage B2: the workspace list changed from `before`. Keep the transition on the same
++    /// workspaces by handle, not on the same numbers (see `Transition::remap`). Call after
++    /// `active` has been updated.
++    fn remap_transition(&mut self, before: &[WorkspaceHandle]) {
++        let after = self.workspace_handles();
++        let map = workspace_transition::index_map(before, &after);
++        self.transition
++            .remap(Instant::now(), &map, after.len(), self.active);
++    }
++
+     fn post_remove_workspace(
+         &mut self,
+         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+@@ -737,8 +927,10 @@ impl WorkspaceSet {
+     ) -> Option<Workspace> {
+         let previous_active_handle = self.workspaces[self.active].handle;
+         let idx = self.workspaces.iter().position(|w| w.handle == *handle)?;
++        let before = self.workspace_handles();
+         let workspace = self.workspaces.remove(idx);
+         self.post_remove_workspace(workspace_state, &previous_active_handle);
++        self.remap_transition(&before);
+         Some(workspace)
+     }
+ 
+@@ -749,9 +941,11 @@ impl WorkspaceSet {
+         cb: impl Fn(&Workspace) -> bool,
+     ) -> Vec<Workspace> {
+         let previous_active_handle = self.workspaces[self.active].handle;
++        let before = self.workspace_handles();
+         let (prefers, doesnt) = self.workspaces.drain(..).partition(cb);
+         self.workspaces = doesnt;
+         self.post_remove_workspace(workspace_state, &previous_active_handle);
++        self.remap_transition(&before);
+         prefers
+     }
+ 
+@@ -1048,7 +1242,9 @@ impl Workspaces {
+             workspace_state.move_workspace_to_group(new_set.group, workspace.handle);
+             workspace.set_output(to, true);
+             workspace.refresh();
++            let before = new_set.workspace_handles();
+             new_set.workspaces.insert(new_set.active + 1, workspace);
++            new_set.remap_transition(&before);
+             new_set.update_workspace_idxs(workspace_state);
+         }
+     }
+@@ -1079,6 +1275,7 @@ impl Workspaces {
+                 // old set in cause we're moving an active workspace within the same set.
+                 let new_set = &mut self.sets[&new_output];
+                 let previous_active_handle = new_set.workspaces[new_set.active].handle;
++                let new_set_before = new_set.workspace_handles();
+ 
+                 // Remove workspace from old set
+                 let old_set = &mut self.sets[&old_output];
+@@ -1119,6 +1316,7 @@ impl Workspaces {
+                     .position(|w| w.handle == previous_active_handle)
+                     .unwrap();
+ 
++                new_set.remap_transition(&new_set_before);
+                 new_set.update_workspace_idxs(workspace_state);
+             }
+             WorkspaceMode::Global => {
+@@ -1140,6 +1338,7 @@ impl Workspaces {
+                 for set in self.sets.values_mut() {
+                     if old_idx < set.workspaces.len() && other_idx < set.workspaces.len() {
+                         let previous_active_handle = set.workspaces[set.active].handle;
++                        let before = set.workspace_handles();
+ 
+                         if other_idx > old_idx {
+                             let insert_idx = if after { other_idx } else { other_idx - 1 };
+@@ -1155,6 +1354,7 @@ impl Workspaces {
+                             .position(|w| w.handle == previous_active_handle)
+                             .unwrap();
+ 
++                        set.remap_transition(&before);
+                         set.update_workspace_idxs(workspace_state);
+                     }
+                 }
+@@ -1212,6 +1412,8 @@ impl Workspaces {
+                     }
+                 }
+ 
++                let befores: Vec<Vec<WorkspaceHandle>> =
++                    self.sets.values().map(|s| s.workspace_handles()).collect();
+                 for (j, pair) in pairs.iter().enumerate() {
+                     for (i, x) in pair.iter().enumerate() {
+                         // Fill up sets, where necessary
+@@ -1234,6 +1436,9 @@ impl Workspaces {
+                         // Otherwise we are fine
+                     }
+                 }
++                for (set, before) in self.sets.values_mut().zip(befores.iter()) {
++                    set.remap_transition(before);
++                }
+             }
+             _ => {}
+         };
+@@ -1241,6 +1446,23 @@ impl Workspaces {
+         self.refresh(workspace_state, xdg_activation_state)
+     }
+ 
++    /// cosmic-mac B3.2: clear every Space-owner marker whose owner closed, left that workspace,
++    /// is marked twice, or sits on a desktop (`mac_spaces::native_markers_to_clear`). Sets
++    /// without markers are skipped, so this is a no-op until B3.3 sets markers.
++    pub fn mac_validate_space_owners(&mut self, xdg_activation_state: &XdgActivationState) {
++        for set in self.sets.values_mut() {
++            if set.workspaces.iter().all(|w| w.mac_space_owner.is_none()) {
++                continue;
++            }
++            let (snapshot, _) = set.mac_spaces_snapshot(xdg_activation_state);
++            for idx in mac_spaces::native_markers_to_clear(&snapshot) {
++                if let Some(workspace) = set.workspaces.get_mut(idx) {
++                    workspace.mac_space_owner = None;
++                }
++            }
++        }
++    }
++
+     pub fn recalculate(&mut self) {
+         for set in self.sets.values_mut() {
+             set.sticky_layer.recalculate();
+@@ -1301,6 +1523,8 @@ impl Workspaces {
+                     }
+                 }
+ 
++                let befores: Vec<Vec<WorkspaceHandle>> =
++                    self.sets.values().map(|s| s.workspace_handles()).collect();
+                 self.sets.values_mut().for_each(|s| {
+                     let mut iter = keep.iter();
+                     s.workspaces.retain(|_| *iter.next().unwrap());
+@@ -1309,6 +1533,9 @@ impl Workspaces {
+                 self.sets.values_mut().for_each(|s| {
+                     s.active = active;
+                 });
++                for (set, before) in self.sets.values_mut().zip(befores.iter()) {
++                    set.remap_transition(before);
++                }
+ 
+                 if keep.iter().any(|val| !(*val)) {
+                     for set in self.sets.values_mut() {
+@@ -1349,14 +1576,31 @@ impl Workspaces {
              .or(self.backup_set.as_ref())
              .map(|set| {
                  (
@@ -1385,7 +1609,7 @@ index 47d7885..5588133 100644
      pub fn active_mut(&mut self, output: &Output) -> Option<&mut Workspace> {
          self.sets
              .get_mut(output)
-@@ -1363,7 +1501,7 @@ impl Workspaces {
+@@ -1366,7 +1610,7 @@ impl Workspaces {
  
      pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
          let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
@@ -1394,7 +1618,15 @@ index 47d7885..5588133 100644
      }
  
      pub fn idx_for_handle(&self, output: &Output, handle: &WorkspaceHandle) -> Option<usize> {
-@@ -1785,115 +1923,71 @@ impl Shell {
+@@ -1733,6 +1977,7 @@ impl Shell {
+             override_redirect_windows: Vec::new(),
+             session_lock: None,
+             previous_workspace_idx: None,
++            mac_spaces_intents: Default::default(),
+             xwayland_keyboard_grab: None,
+ 
+             theme,
+@@ -1788,115 +2033,203 @@ impl Shell {
          }
      }
  
@@ -1404,13 +1636,144 @@ index 47d7885..5588133 100644
 -                if let Some(set) = self.workspaces.sets.get_mut(output) {
 -                    set.update_workspace_delta(delta, forward);
 -                }
--            }
++    /// Handle a client's ext-workspace create request: add an empty workspace
++    /// at the end of that display's list.
++    /// cosmic-mac B3.2: record a native Spaces intent. Rejected (returns false) unless native
++    /// Spaces are on, the kind is enabled and it is a real intent, never an internal change.
++    /// Not called yet.
++    pub fn mac_spaces_record(&mut self, intent: MacSpacesIntent) -> bool {
++        self.mac_spaces_intents.push(&MAC_NATIVE_SPACES, intent)
++    }
++
++    /// cosmic-mac B3.2: take the recorded intents (B3.3 drains these). Not called yet.
++    pub fn mac_spaces_take_intents(&mut self) -> Vec<MacSpacesIntent> {
++        self.mac_spaces_intents.drain()
++    }
++
++    /// cosmic-mac B3.3: an explicit maximize request for `mapped` from `source`. COSMIC's own
++    /// maximize has already been applied; this only records the native Spaces intent (refused
++    /// unless native Spaces are on and `source` is an intent).
++    pub fn mac_spaces_maximize_requested(
++        &mut self,
++        mapped: &CosmicMapped,
++        source: mac_spaces::MaximizeSource,
++    ) {
++        let intent = source.intent(mapped.active_window().downgrade());
++        self.mac_spaces_record(intent);
++    }
++
++    /// cosmic-mac B3.3: act on the recorded native Spaces intents, oldest first, each once.
++    /// Called at the start of every event-loop refresh, before workspaces are refreshed and
++    /// pruned, so a new Space is never empty when pruning runs.
++    pub fn mac_spaces_drain(state: &mut State) {
++        let intents = state.common.shell.write().mac_spaces_take_intents();
++        if intents.is_empty() {
++            return;
++        }
++        let config = mac_native_spaces_config();
++        for intent in intents {
++            let focus = {
++                let mut shell = state.common.shell.write();
++                shell.mac_spaces_apply_maximize(
++                    &intent,
++                    &config,
++                    &state.common.xdg_activation_state,
++                    &mut state.common.workspace_state.update(),
++                    &state.common.event_loop_handle,
++                )
++            };
++            if let Some((target, seat)) = focus {
++                Shell::set_focus(state, Some(&target), &seat, None, true);
+             }
 -            WorkspaceMode::Global => {
 -                for set in self.workspaces.sets.values_mut() {
 -                    set.update_workspace_delta(delta, forward);
 -                }
-+    /// Handle a client's ext-workspace create request: add an empty workspace
-+    /// at the end of that display's list.
++        }
++    }
++
++    /// cosmic-mac B3.3: one maximize intent. Skips (leaving COSMIC's normal maximize as it is)
++    /// unless `mac_spaces::native_maximize_plan` says to create a Space. Then: append a
++    /// workspace to the window's output, move the window there (`move_window` keeps it
++    /// maximized), mark the workspace as its Space by window identity, and activate it unless
++    /// a gesture is tracking. Returns the focus to give when the Space was activated.
++    fn mac_spaces_apply_maximize(
++        &mut self,
++        intent: &MacSpacesIntent,
++        config: &mac_spaces::NativeSpacesConfig,
++        xdg_activation_state: &XdgActivationState,
++        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
++        evlh: &LoopHandle<'static, State>,
++    ) -> Option<(KeyboardFocusTarget, Seat<State>)> {
++        if intent.kind != mac_spaces::BigKind::Maximize
++            || intent.change != mac_spaces::IntentChange::BecomeBig
++        {
++            return None;
++        }
++        let surface = intent.window.upgrade().filter(|s| s.alive())?;
++        let mapped = self.element_for_surface(&surface).cloned()?;
++        // the window's workspace, by identity (sticky windows are in no workspace: skipped)
++        let (output, idx) = self.workspaces.sets.iter().find_map(|(output, set)| {
++            set.workspaces
++                .iter()
++                .position(|w| w.mapped().any(|m| m == &mapped))
++                .map(|idx| (output.clone(), idx))
++        })?;
++        let set = self.workspaces.sets.get(&output)?;
++        let from = set.workspaces[idx].handle;
++        let (snapshot, mut ids) = set.mac_spaces_snapshot(xdg_activation_state);
++        let window_id = ids.id_of(&surface);
++        let ctx = mac_spaces::MaximizeContext {
++            gesture_tracking: set.transition.is_tracking(),
++            new_space_tiling: set.tiling_enabled,
++            movable: !mapped.is_stack() && !mapped.is_minimized() && !surface.is_fullscreen(true),
++        };
++        let mac_spaces::MaximizePlan::CreateSpace { activate } =
++            mac_spaces::native_maximize_plan(&snapshot, config, idx, window_id, intent.origin, ctx)
++        else {
++            return None;
++        };
++
++        // always a new workspace, appended (indices of existing workspaces do not change)
++        let set = self.workspaces.sets.get_mut(&output)?;
++        set.add_empty_workspace(workspace_state);
++        let to = set.workspaces.last()?.handle;
++        let seat = self.seats.last_active().clone();
++        let _ = self.move_window(
++            Some(&seat),
++            &surface,
++            &from,
++            &to,
++            false,
++            None,
++            workspace_state,
++            evlh,
++        );
++        let moved = self.workspaces.space_for_handle(&to).is_some_and(|w| {
++            w.mapped()
++                .any(|m| m.windows().any(|(s, _)| s == surface))
++        });
++        if !moved {
++            // nothing moved: the empty workspace is pruned at the next refresh (not active)
++            return None;
++        }
++        if let Some(space) = self.workspaces.space_for_handle_mut(&to) {
++            space.mac_space_owner = Some(surface.downgrade());
++        }
++        let new_mapped = self.element_for_surface(&surface).cloned()?;
++        if new_mapped.maximized_state.lock().unwrap().is_none() {
++            // MaximizeSource::NativeSpaces: internal, records no intent
++            self.maximize_request(&new_mapped, &seat, false, evlh);
++        }
++        if activate != mac_spaces::Activation::Now {
++            return None;
++        }
++        let new_idx = self.workspaces.idx_for_handle(&output, &to)?;
++        self.activate(&output, new_idx, WorkspaceDelta::new_shortcut(), workspace_state)
++            .ok()?;
++        Some((KeyboardFocusTarget::Element(new_mapped), seat))
++    }
++
 +    pub fn mac_create_workspace(
 +        &mut self,
 +        group: &WorkspaceGroupHandle,
@@ -1566,7 +1929,7 @@ index 47d7885..5588133 100644
          }
      }
  
-@@ -2294,10 +2388,7 @@ impl Shell {
+@@ -2312,10 +2645,7 @@ impl Shell {
  
      pub fn animations_going(&self) -> bool {
          self.workspaces.sets.values().any(|set| {
@@ -1578,7 +1941,15 @@ index 47d7885..5588133 100644
          }) || !matches!(
              self.overview_mode,
              OverviewMode::None | OverviewMode::Active(_)
-@@ -2931,6 +3022,7 @@ impl Shell {
+@@ -2629,6 +2959,7 @@ impl Shell {
+             }
+         }
+ 
++        self.workspaces.mac_validate_space_owners(xdg_activation_state);
+         self.workspaces
+             .refresh(workspace_state, xdg_activation_state);
+ 
+@@ -2949,6 +3280,7 @@ impl Shell {
          let workspace_handle = workspace.handle;
          let is_dialog = layout::is_dialog(&window);
          let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);
@@ -1586,7 +1957,7 @@ index 47d7885..5588133 100644
  
          if should_be_fullscreen {
              workspace.map_fullscreen(&window, &seat, None, None);
-@@ -2949,6 +3041,7 @@ impl Shell {
+@@ -2967,6 +3299,7 @@ impl Shell {
              && !should_be_minimized
              && !should_be_maximized
              && !(workspace.is_tiled(&focused.active_window()) && floating_exception)
@@ -1594,7 +1965,7 @@ index 47d7885..5588133 100644
          {
              stack.add_window(window, None, None);
              if was_activated {
-@@ -2970,8 +3063,11 @@ impl Shell {
+@@ -2988,8 +3321,11 @@ impl Shell {
          }
  
          let workspace_empty = workspace.mapped().next().is_none();
@@ -1608,7 +1979,18 @@ index 47d7885..5588133 100644
          } else {
              for mapped in workspace
                  .mapped()
-@@ -3004,6 +3100,7 @@ impl Shell {
+@@ -3012,6 +3348,10 @@ impl Shell {
+ 
+         if should_be_maximized {
+             self.maximize_request(&mapped, &seat, false, loop_handle);
++            self.mac_spaces_maximize_requested(
++                &mapped,
++                mac_spaces::MaximizeSource::MapRequestedMaximized,
++            );
+         }
+ 
+         if should_be_minimized {
+@@ -3022,6 +3362,7 @@ impl Shell {
              None
          } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)
              || should_be_sticky
@@ -1616,7 +1998,7 @@ index 47d7885..5588133 100644
          {
              // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
              Some(KeyboardFocusTarget::from(mapped.clone()))
-@@ -3434,13 +3531,24 @@ impl Shell {
+@@ -3452,13 +3793,24 @@ impl Shell {
                      self.theme.clone(),
                      self.appearance_conf,
                  ));
@@ -1645,8 +2027,101 @@ index 47d7885..5588133 100644
                  mapped.into()
              } else if !matches!(window_state, WorkspaceRestoreData::Fullscreen(_))
                  && to_workspace.tiling_enabled
+@@ -4356,6 +4708,7 @@ impl Shell {
+                 return;
+             }
+             self.maximize_request(window, seat, true, loop_handle);
++            self.mac_spaces_maximize_requested(window, mac_spaces::MaximizeSource::UserToggle);
+         }
+     }
+ 
+diff --git a/src/shell/workspace.rs b/src/shell/workspace.rs
+index 84a020f..4b0b9f6 100644
+--- a/src/shell/workspace.rs
++++ b/src/shell/workspace.rs
+@@ -118,6 +118,10 @@ pub struct Workspace {
+     output_stack: VecDeque<OutputMatch>,
+     pub(super) backdrop_id: Id,
+     pub dirty: AtomicBool,
++    /// cosmic-mac B3: the window this workspace is the dedicated Space of (native Spaces).
++    /// Weak, so it never keeps a closed window alive; validated every refresh
++    /// (`Workspaces::mac_validate_space_owners`). Not set by anything yet.
++    pub mac_space_owner: Option<crate::shell::element::surface::WeakCosmicSurface>,
+ }
+ 
+ #[derive(Debug)]
+@@ -412,6 +416,7 @@ impl Workspace {
+             },
+             backdrop_id: Id::new(),
+             dirty: AtomicBool::new(false),
++            mac_space_owner: None,
+         }
+     }
+ 
+@@ -449,6 +454,7 @@ impl Workspace {
+             },
+             backdrop_id: Id::new(),
+             dirty: AtomicBool::new(false),
++            mac_space_owner: None,
+         }
+     }
+ 
+@@ -495,6 +501,53 @@ impl Workspace {
+ 
+     // Auto-removal of workspaces is allowed if empty, unless blocked by an
+     // unused and unexpired activation token, or pinned.
++    /// cosmic-mac B3.2: this workspace as a `mac_spaces` snapshot entry. Windows get ids by
++    /// identity through `ids`; a Space owner that no longer exists gets an id no window has.
++    /// `recently_created` is filled in by the workspace set.
++    pub fn mac_space_info(
++        &self,
++        ids: &mut crate::shell::mac_spaces::IdentityMap<CosmicSurface>,
++        xdg_activation_state: &XdgActivationState,
++    ) -> crate::shell::mac_spaces::WorkspaceInfo {
++        use crate::shell::mac_spaces::{WindowInfo, WindowState, WorkspaceInfo};
++        let mut windows = Vec::new();
++        for mapped in self.mapped() {
++            let maximized = mapped.maximized_state.lock().unwrap().is_some();
++            for (surface, _) in mapped.windows() {
++                windows.push(WindowInfo {
++                    id: ids.id_of(&surface),
++                    state: WindowState { maximized, fullscreen: false, minimized: false },
++                });
++            }
++        }
++        for minimized in &self.minimized_windows {
++            for surface in minimized.windows() {
++                windows.push(WindowInfo {
++                    id: ids.id_of(&surface),
++                    state: WindowState { maximized: false, fullscreen: false, minimized: true },
++                });
++            }
++        }
++        for fullscreen in self.get_fullscreen_surfaces() {
++            windows.push(WindowInfo {
++                id: ids.id_of(&fullscreen.surface),
++                state: WindowState { maximized: false, fullscreen: true, minimized: false },
++            });
++        }
++        let space_owner = self.mac_space_owner.as_ref().map(|owner| match owner.upgrade() {
++            Some(surface) if surface.alive() => ids.id_of(&surface),
++            _ => ids.absent(),
++        });
++        WorkspaceInfo {
++            pinned: self.pinned,
++            windows,
++            has_activation_token: self.has_activation_token(xdg_activation_state),
++            recently_created: false,
++            space_owner,
++            tiling_enabled: self.tiling_enabled,
++        }
++    }
++
+     pub fn can_auto_remove(&self, xdg_activation_state: &XdgActivationState) -> bool {
+         self.is_empty() && !self.has_activation_token(xdg_activation_state) && !self.pinned
+     }
 diff --git a/src/state.rs b/src/state.rs
-index 28ed8fd..d8197cf 100644
+index 86f5e23..e612a23 100644
 --- a/src/state.rs
 +++ b/src/state.rs
 @@ -9,7 +9,7 @@ use crate::{
@@ -1658,7 +2133,7 @@ index 28ed8fd..d8197cf 100644
      shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
      utils::prelude::OutputExt,
      wayland::{
-@@ -246,7 +246,7 @@ pub struct Common {
+@@ -247,7 +247,7 @@ pub struct Common {
      pub should_stop: bool,
      pub kiosk_exit_code: Option<i32>,
  
@@ -1667,7 +2142,7 @@ index 28ed8fd..d8197cf 100644
  
      /// Active libei sender seats, keyed by their `eis` connection. Tracked so their virtual
      /// keyboards can be re-created when the keyboard configuration changes at runtime.
-@@ -778,7 +778,7 @@ impl State {
+@@ -783,7 +783,7 @@ impl State {
                  startup_done: Arc::new(AtomicBool::new(false)),
                  should_stop: false,
                  kiosk_exit_code: None,
@@ -1714,6 +2189,21 @@ index 28682e0..4cb9623 100644
 +        .geometry;
 +    geometry.filter(|g| !g.is_empty())
 +}
+diff --git a/src/wayland/handlers/toplevel_management.rs b/src/wayland/handlers/toplevel_management.rs
+index b1616bc..58d14e6 100644
+--- a/src/wayland/handlers/toplevel_management.rs
++++ b/src/wayland/handlers/toplevel_management.rs
+@@ -212,6 +212,10 @@ impl ToplevelManagementHandler for State {
+         if let Some(mapped) = shell.element_for_surface(window).cloned() {
+             let seat = shell.seats.last_active().clone();
+             shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
++            shell.mac_spaces_maximize_requested(
++                &mapped,
++                crate::shell::mac_spaces::MaximizeSource::ToplevelManagement,
++            );
+         }
+     }
+ 
 diff --git a/src/wayland/handlers/workspace.rs b/src/wayland/handlers/workspace.rs
 index fc5c835..e98caca 100644
 --- a/src/wayland/handlers/workspace.rs
@@ -1729,3 +2219,35 @@ index fc5c835..e98caca 100644
                  Request::SetPin { workspace, pinned } => {
                      let mut shell = self.common.shell.write();
                      if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
+diff --git a/src/wayland/handlers/xdg_shell/mod.rs b/src/wayland/handlers/xdg_shell/mod.rs
+index be7084d..1820b80 100644
+--- a/src/wayland/handlers/xdg_shell/mod.rs
++++ b/src/wayland/handlers/xdg_shell/mod.rs
+@@ -252,7 +252,11 @@ impl XdgShellHandler for State {
+         let mut shell = self.common.shell.write();
+         if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+             let seat = shell.seats.last_active().clone();
+-            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle)
++            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
++            shell.mac_spaces_maximize_requested(
++                &mapped,
++                crate::shell::mac_spaces::MaximizeSource::XdgRequest,
++            );
+         } else if let Some(pending) = shell
+             .pending_windows
+             .iter_mut()
+diff --git a/src/xwayland.rs b/src/xwayland.rs
+index cc6be3b..e67b4e5 100644
+--- a/src/xwayland.rs
++++ b/src/xwayland.rs
+@@ -1123,6 +1123,10 @@ impl XwmHandler for State {
+         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
+             let seat = shell.seats.last_active().clone();
+             shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
++            shell.mac_spaces_maximize_requested(
++                &mapped,
++                crate::shell::mac_spaces::MaximizeSource::X11Request,
++            );
+         } else if let Some(pending) = shell
+             .pending_windows
+             .iter_mut()

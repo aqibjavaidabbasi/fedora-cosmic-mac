@@ -115,7 +115,7 @@ VIEW = r'''            // ---- macOS Spotlight (cosmic-mac patches/launcher.py) 
                             let c = t.cosmic();
                             let mut color: Color = c.on_bg_color().into();
                             color.a = 0.6;
-                            cosmic::iced::widget::text::Style { color: Some(color), selected_fill: c.accent_color().into() }
+                            cosmic::iced::widget::text::Style { color: Some(color), selected_fill: c.accent_color().into(), ..Default::default() }
                         }));
                     let mut content = Vec::new();
                     match self.launcher_item_icon_handles.get(i) {

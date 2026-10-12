@@ -33,7 +33,7 @@ index dd642f4..abc9e5d 100644
  
              dialog = dialog
 diff --git a/src/components/polkit_dialog.rs b/src/components/polkit_dialog.rs
-index 80f9fc6..7ca7d96 100644
+index 1239599..55c1d86 100644
 --- a/src/components/polkit_dialog.rs
 +++ b/src/components/polkit_dialog.rs
 @@ -231,14 +231,18 @@ impl State {

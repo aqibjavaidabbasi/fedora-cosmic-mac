@@ -1,5 +1,5 @@
 diff --git a/i18n/en/cosmic_store.ftl b/i18n/en/cosmic_store.ftl
-index db43830..186fa5f 100644
+index 84b93ec..ed75b05 100644
 --- a/i18n/en/cosmic_store.ftl
 +++ b/i18n/en/cosmic_store.ftl
 @@ -1,4 +1,4 @@
@@ -20,7 +20,7 @@ index baba511..4b5b9d8 100644
  Exec=cosmic-store %u
  Terminal=false
 diff --git a/src/main.rs b/src/main.rs
-index 7927b1c..97a2fd1 100644
+index 9f5a89a..3bf8467 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -84,6 +84,7 @@ mod explore;
@@ -31,7 +31,7 @@ index 7927b1c..97a2fd1 100644
  
  use search::{CachedExploreResults, SearchResult};
  mod search;
-@@ -280,6 +281,11 @@ impl CosmicFlags for Flags {
+@@ -281,6 +282,11 @@ impl CosmicFlags for Flags {
  /// Messages that are used specifically by our [`App`].
  #[derive(Clone, Debug)]
  pub enum Message {
@@ -43,7 +43,7 @@ index 7927b1c..97a2fd1 100644
      AppTheme(AppTheme),
      BackendUpdate(BackendName, Arc<dyn Backend>),
      BackendUpdateFinished,
-@@ -1646,7 +1652,14 @@ impl App {
+@@ -1647,7 +1653,14 @@ impl App {
  
      fn update_title(&mut self) -> Task<Message> {
          if let Some(window_id) = &self.core.main_window_id() {
@@ -59,7 +59,7 @@ index 7927b1c..97a2fd1 100644
          } else {
              Task::none()
          }
-@@ -2120,7 +2133,10 @@ impl Application for App {
+@@ -2121,7 +2134,10 @@ impl Application for App {
          }
  
          match app.mode {
@@ -71,7 +71,7 @@ index 7927b1c..97a2fd1 100644
              Mode::GStreamer { .. } => {
                  app.core.window.use_template = false;
              }
-@@ -2130,6 +2146,21 @@ impl Application for App {
+@@ -2131,6 +2147,21 @@ impl Application for App {
          (app, command)
      }
  
@@ -93,7 +93,7 @@ index 7927b1c..97a2fd1 100644
      fn nav_model(&self) -> Option<&widget::nav_bar::Model> {
          match self.mode {
              Mode::GStreamer { .. } => None,
-@@ -2212,7 +2243,8 @@ impl Application for App {
+@@ -2213,7 +2244,8 @@ impl Application for App {
  
      /// Handle application events here.
      fn update(&mut self, message: Self::Message) -> Task<Message> {
@@ -103,15 +103,22 @@ index 7927b1c..97a2fd1 100644
      }
  
      fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Message>> {
-@@ -2509,7 +2541,6 @@ impl Application for App {
+@@ -2512,14 +2544,6 @@ impl Application for App {
                  widget::id_container(
                      widget::column::with_capacity(2)
                          .spacing(space_xxs)
--                        .push_maybe(self.back_button())
+-                        .push_maybe(self.back_button().map(|element| {
+-                            element
+-                                .apply(widget::container)
+-                                .padding([0, space_xl, 0, space_xl])
+-                                .max_width(MAX_GRID_WIDTH)
+-                                .apply(widget::container)
+-                                .align_x(Alignment::Center)
+-                        }))
                          .push(
                              self.view_responsive(size)
                                  .apply(widget::container)
-@@ -2642,7 +2673,10 @@ impl Application for App {
+@@ -2653,7 +2677,10 @@ impl Application for App {
  
          // Uncomment to debug layout:
          //content.explain(cosmic::iced::Color::WHITE)
@@ -124,14 +131,13 @@ index 7927b1c..97a2fd1 100644
  
      fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
 diff --git a/src/search.rs b/src/search.rs
-index 52b38bd..51aacd4 100644
+index db24543..04cee40 100644
 --- a/src/search.rs
 +++ b/src/search.rs
-@@ -292,7 +292,16 @@ impl SearchResult {
-         .width(Length::Fixed(width as f32))
-         .height(Length::Fixed(48.0 + (spacing.space_xxs as f32) * 2.0))
+@@ -311,6 +311,16 @@ impl SearchResult {
+                 .max(ICON_SIZE_SEARCH as f32 + (spacing.space_xxs as f32) * 4.0),
+         ))
          .padding([spacing.space_xxs, spacing.space_s])
--        .class(theme::Container::Card)
 +        .class(theme::Container::custom(|t| {
 +            // soft Mac tile instead of COSMIC's card
 +            let c = t.cosmic();
@@ -162,18 +168,17 @@ index 13ec62e..4aaa535 100644
                  config_set!(app_theme, app_theme);
                  return self.update_config();
 diff --git a/src/view.rs b/src/view.rs
-index 6e34bea..2662d54 100644
+index 7631c76..833689a 100644
 --- a/src/view.rs
 +++ b/src/view.rs
-@@ -737,63 +737,7 @@ impl App {
+@@ -787,77 +787,7 @@ impl App {
                                          .height(Length::Fixed(size.height))
                                          .into()
                                  } else {
 -                                    let explore_pages = ExplorePage::all();
 -                                    let mut column =
--                                        widget::column::with_capacity(explore_pages.len() * 2)
--                                            .padding([0, space_s, space_m, space_s])
--                                            .spacing(space_xxs)
+-                                        widget::column::with_capacity(explore_pages.len())
+-                                            .spacing(space_xl)
 -                                            .width(Length::Fill);
 -                                    for explore_page in explore_pages.iter() {
 -                                        //TODO: ensure explore_page matches
@@ -195,32 +200,47 @@ index 6e34bea..2662d54 100644
 -                                                let results_len =
 -                                                    cmp::min(results.len(), max_results);
 -
--                                                column = column.push(widget::row::with_children([
--                                                    widget::text::title4(explore_page.title())
+-                                                column = column.push(
+-                                                    widget::column::with_children(vec![
+-                                                        widget::row::with_children([
+-                                                            widget::mouse_area(
+-                                                                widget::text::title4(
+-                                                                    explore_page.title(),
+-                                                                ),
+-                                                            )
+-                                                            .on_press(Message::ExplorePage(Some(
+-                                                                *explore_page,
+-                                                            )))
+-                                                            .into(),
+-                                                            widget::button::icon(
+-                                                                icon_cache_handle(
+-                                                                    "go-next-symbolic",
+-                                                                    16,
+-                                                                ),
+-                                                            )
+-                                                            .on_press(Message::ExplorePage(Some(
+-                                                                *explore_page,
+-                                                            )))
+-                                                            .into(),
+-                                                        ])
+-                                                        .align_y(Alignment::Center)
+-                                                        .padding(title_padding)
 -                                                        .into(),
--                                                    widget::space::horizontal().into(),
--                                                    widget::button::text(fl!("see-all"))
--                                                        .trailing_icon(icon_cache_handle(
--                                                            "go-next-symbolic",
--                                                            16,
--                                                        ))
--                                                        .on_press(Message::ExplorePage(Some(
--                                                            *explore_page,
--                                                        )))
--                                                        .into(),
--                                                ]));
--
--                                                column = column.push(SearchResult::grid_view(
--                                                    &results[..results_len],
--                                                    spacing,
--                                                    grid_width,
--                                                    |result_i| {
--                                                        Message::SelectExploreResult(
--                                                            *explore_page,
--                                                            result_i,
+-                                                        SearchResult::grid_view(
+-                                                            &results[..results_len],
+-                                                            spacing,
+-                                                            grid_width,
+-                                                            |result_i| {
+-                                                                Message::SelectExploreResult(
+-                                                                    *explore_page,
+-                                                                    result_i,
+-                                                                )
+-                                                            },
 -                                                        )
--                                                    },
--                                                ));
+-                                                        .into(),
+-                                                    ])
+-                                                    .spacing(space_xxs),
+-                                                );
 -                                            }
 -                                            _ => {}
 -                                        }

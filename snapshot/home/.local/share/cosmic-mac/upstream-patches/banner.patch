@@ -1,5 +1,5 @@
 diff --git a/src/app.rs b/src/app.rs
-index 6e0ea20..af73ea4 100644
+index 99eca8c..ceedd68 100644
 --- a/src/app.rs
 +++ b/src/app.rs
 @@ -271,6 +271,7 @@ impl CosmicNotifications {
@@ -182,7 +182,7 @@ index 6e0ea20..af73ea4 100644
                  )
                  .discard(),
              );
-@@ -837,13 +790,7 @@ impl cosmic::Application for CosmicNotifications {
+@@ -845,13 +798,7 @@ impl cosmic::Application for CosmicNotifications {
                  tasks.push(
                      corner_radius(
                          id,

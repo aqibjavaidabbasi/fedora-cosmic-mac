@@ -1,8 +1,8 @@
 diff --git a/cosmic-panel-bin/src/space/panel_space.rs b/cosmic-panel-bin/src/space/panel_space.rs
-index 4ae16ca..3f18a5b 100644
+index 17ea5fd..dff1d02 100644
 --- a/cosmic-panel-bin/src/space/panel_space.rs
 +++ b/cosmic-panel-bin/src/space/panel_space.rs
-@@ -1760,6 +1760,13 @@ impl PanelSpace {
+@@ -1763,6 +1763,13 @@ impl PanelSpace {
              needs_commit = true;
          }
  
@@ -17,10 +17,10 @@ index 4ae16ca..3f18a5b 100644
          if config.autohide_enabled() && !self.config.autohide_enabled()
              || !config.autohide_enabled() && self.config.autohide_enabled()
 diff --git a/cosmic-panel-bin/src/space_container/space_container.rs b/cosmic-panel-bin/src/space_container/space_container.rs
-index cdfdd05..6e500b8 100644
+index db2616f..9636ef1 100644
 --- a/cosmic-panel-bin/src/space_container/space_container.rs
 +++ b/cosmic-panel-bin/src/space_container/space_container.rs
-@@ -344,14 +344,14 @@ impl SpaceContainer {
+@@ -346,14 +346,14 @@ impl SpaceContainer {
              || (c.name == entry.name
                  && (c.is_horizontal() != entry.is_horizontal()
                  || c.size != entry.size
@@ -38,7 +38,7 @@ index cdfdd05..6e500b8 100644
              // || self.space_list.iter().any(|s| s.has_layer_overlap())
  
          );
-@@ -642,3 +642,14 @@ impl SpaceContainer {
+@@ -644,3 +644,14 @@ impl SpaceContainer {
          }
      }
  }

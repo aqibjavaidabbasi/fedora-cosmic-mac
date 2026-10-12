@@ -27,7 +27,7 @@ index 591fbf3..a45cb85 100644
  
  #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 diff --git a/cosmic-panel-button/src/lib.rs b/cosmic-panel-button/src/lib.rs
-index fe411f8..50e4ceb 100644
+index 68c55af..e336d47 100644
 --- a/cosmic-panel-button/src/lib.rs
 +++ b/cosmic-panel-button/src/lib.rs
 @@ -20,6 +20,19 @@ use std::{env, fs, process::Command, sync::LazyLock};
@@ -51,7 +51,7 @@ index fe411f8..50e4ceb 100644
  
  #[derive(Debug, Clone, Default)]
 @@ -42,6 +55,53 @@ enum Msg {
-     Surface(surface::Action),
+     Surface(surface::Action<Msg>),
  }
  
 +/// A Dock button draws no highlight behind its icon, like macOS.
@@ -159,8 +159,8 @@ index fe411f8..50e4ceb 100644
 +                    .pick(&self.core.applet.panel_type.to_string());
              }
              Msg::Surface(a) => {
-                 return cosmic::task::message(cosmic::Action::Cosmic(
-@@ -154,7 +219,7 @@ impl cosmic::Application for Button {
+                 return cosmic::task::message(cosmic::Action::Surface(a));
+@@ -152,7 +217,7 @@ impl cosmic::Application for Button {
          // override for icon, later if text is updated to wrap, we may
          // use Override::Text to override this behavior
          autosize::autosize(
@@ -169,7 +169,7 @@ index fe411f8..50e4ceb 100644
                  && matches!(
                      self.core.applet.anchor,
                      PanelAnchor::Left | PanelAnchor::Right
-@@ -171,8 +236,10 @@ impl cosmic::Application for Button {
+@@ -169,8 +234,10 @@ impl cosmic::Application for Button {
                  cosmic::Element::from(
                      self.core.applet.applet_tooltip::<Msg>(
                          self.icon_button_from_handle(
@@ -182,7 +182,7 @@ index fe411f8..50e4ceb 100644
                          )
                          .on_press_down(Msg::Press),
                          self.desktop.name.clone(),
-@@ -196,7 +263,7 @@ impl cosmic::Application for Button {
+@@ -194,7 +261,7 @@ impl cosmic::Application for Button {
                      .class(cosmic::theme::Button::AppletIcon)
                      .on_press_down(Msg::Press)
                      .into()

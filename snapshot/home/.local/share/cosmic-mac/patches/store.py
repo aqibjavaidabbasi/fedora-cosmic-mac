@@ -64,7 +64,8 @@ patch("src/main.rs", [
     (r"(    fn update\(&mut self, message: Self::Message\) -> Task<Message> \{\n)        self\.handle_update\(message\)\n",
      r"\1        let task = self.handle_update(message);\n        Task::batch([task, mac_store::blur_task(self)])\n"),
     # the back button moves into the toolbar over the content
-    (r"                        \.push_maybe\(self\.back_button\(\)\)\n", ""),
+    # (1.9.0 wraps it in `.map(|element| { ... })`)
+    (r"                        \.push_maybe\(self\.back_button\(\)(?:\.map\(\|element\| \{.*?\}\))?\)\n", ""),
     (r"(        // Uncomment to debug layout:\n        //content\.explain\(cosmic::iced::Color::WHITE\)\n)        content\n",
      r"\1        match self.mode {\n            Mode::Normal => mac_store::window(self, content),\n            _ => content,\n        }\n"),
 ])
@@ -85,7 +86,8 @@ patch("src/view.rs", [
 ])
 
 patch("src/search.rs", [
-    (r"(        \.height\(Length::Fixed\(48\.0 \+ \(spacing\.space_xxs as f32\) \* 2\.0\)\)\n        \.padding\(\[spacing\.space_xxs, spacing\.space_s\]\)\n)        \.class\(theme::Container::Card\)",
+    # (1.9.0 dropped the card on the tile, so the class is added after the padding)
+    (r"(        \.padding\(\[spacing\.space_xxs, spacing\.space_s\]\)\n)(?:        \.class\(theme::Container::Card\)\n)?",
      r"""\1        .class(theme::Container::custom(|t| {
             // soft Mac tile instead of COSMIC's card
             let c = t.cosmic();
@@ -95,7 +97,7 @@ patch("src/search.rs", [
                 border: cosmic::iced::Border { radius: 12.0.into(), width: 1.0, color: cosmic::iced::Color { a: 0.06, ..on } },
                 ..Default::default()
             }
-        }))"""),
+        }))\n"""),
 ])
 
 patch("i18n/en/cosmic_store.ftl", [(r"app-name = COSMIC Store\n", "app-name = App Store\n")])

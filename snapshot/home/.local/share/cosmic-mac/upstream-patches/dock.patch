@@ -1,5 +1,5 @@
 diff --git a/cosmic-app-list/src/app.rs b/cosmic-app-list/src/app.rs
-index 8db96ee..fd9deab 100755
+index 3e5a3a6..6401423 100755
 --- a/cosmic-app-list/src/app.rs
 +++ b/cosmic-app-list/src/app.rs
 @@ -83,10 +83,66 @@ struct AppletIconData {
@@ -201,7 +201,7 @@ index 8db96ee..fd9deab 100755
              Message::Popup(id, parent_window_id) => {
                  if let Some(Popup {
                      parent,
-@@ -1763,6 +1903,45 @@ impl cosmic::Application for CosmicAppList {
+@@ -1761,6 +1901,45 @@ impl cosmic::Application for CosmicAppList {
              PanelAnchor::Top | PanelAnchor::Bottom => true,
              PanelAnchor::Left | PanelAnchor::Right => false,
          };
@@ -247,7 +247,7 @@ index 8db96ee..fd9deab 100755
          let divider_padding = match self.core.applet.size {
              Size::Hardcoded(_) => 4,
              Size::PanelSize(ref s) => {
-@@ -1999,10 +2178,15 @@ impl cosmic::Application for CosmicAppList {
+@@ -1997,10 +2176,15 @@ impl cosmic::Application for CosmicAppList {
                  )
                  .drag_id(DND_FAVORITES),
                  row(active).spacing(app_icon.icon_spacing).into(),
@@ -267,7 +267,7 @@ index 8db96ee..fd9deab 100755
              )
          } else {
              (
-@@ -2074,6 +2258,22 @@ impl cosmic::Application for CosmicAppList {
+@@ -2072,6 +2256,22 @@ impl cosmic::Application for CosmicAppList {
              }
          }
  
@@ -290,7 +290,7 @@ index 8db96ee..fd9deab 100755
          self.core
              .applet
              .autosize_window(content)
-@@ -2508,6 +2708,11 @@ impl cosmic::Application for CosmicAppList {
+@@ -2506,6 +2706,11 @@ impl cosmic::Application for CosmicAppList {
  
      fn subscription(&self) -> Subscription<Message> {
          Subscription::batch([
@@ -302,7 +302,7 @@ index 8db96ee..fd9deab 100755
              wayland_subscription().map(Message::Wayland),
              listen_with(|e, _, id| match e {
                  cosmic::iced::core::Event::PlatformSpecific(event::PlatformSpecific::Wayland(
-@@ -2519,6 +2724,12 @@ impl cosmic::Application for CosmicAppList {
+@@ -2517,6 +2722,12 @@ impl cosmic::Application for CosmicAppList {
                  cosmic::iced::core::Event::Mouse(
                      cosmic::iced::core::mouse::Event::ButtonPressed(_),
                  ) => Some(Message::Pressed(id)),
