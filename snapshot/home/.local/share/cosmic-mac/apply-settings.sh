@@ -32,8 +32,8 @@ put $C/com.system76.CosmicComp/v1/workspaces '(
     workspace_wraparound: false,
 )'
 
-# --- Touchpad: no tap-to-click, natural scroll, pause while typing ---------
-put $C/com.system76.CosmicComp/v1/input_touchpad '(state:Enabled,click_method:Some(Clickfinger),disable_while_typing:Some(true),scroll_config:Some((method:Some(TwoFinger),natural_scroll:Some(true),scroll_button:None,scroll_factor:None)),tap_config:Some((enabled:false,button_map:Some(LeftRightMiddle),drag:true,drag_lock:false)))'
+# --- Touchpad: tap-to-click, natural scroll, pause while typing ------------
+put $C/com.system76.CosmicComp/v1/input_touchpad '(state:Enabled,click_method:Some(Clickfinger),disable_while_typing:Some(true),scroll_config:Some((method:Some(TwoFinger),natural_scroll:Some(true),scroll_button:None,scroll_factor:None)),tap_config:Some((enabled:true,button_map:Some(LeftRightMiddle),drag:true,drag_lock:false)))'
 
 # --- Dock: macOS shelf. Apps | Downloads, Trash on a glass shelf, hover magnification ---
 # cosmic-maximize-to-workspace copies this into one dock per display ("Dock-<display>")
@@ -209,6 +209,14 @@ OnlyShowIn=COSMIC;
 X-GNOME-Autostart-enabled=false
 NoDisplay=true
 "
+
+# KDE's XWayland screen-sharing bridge exposes a black window in COSMIC.
+# Keep it available in Plasma, but do not autostart it in COSMIC sessions.
+if [ -f /etc/xdg/autostart/org.kde.xwaylandvideobridge.desktop ]; then
+    sed '/^\[Desktop Entry\]/a NotShowIn=COSMIC;' \
+        /etc/xdg/autostart/org.kde.xwaylandvideobridge.desktop \
+        > ~/.config/autostart/org.kde.xwaylandvideobridge.desktop
+fi
 
 # --- Per-display top bars ----------------------------------------------------
 # cosmic-maximize-to-workspace gives every display its own bar ("Panel-<display>")
