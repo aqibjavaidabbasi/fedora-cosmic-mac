@@ -1,8 +1,8 @@
 diff --git a/cosmic-app-list/src/app.rs b/cosmic-app-list/src/app.rs
-index 3e5a3a6..6401423 100755
+index 08bda82..58e5be3 100755
 --- a/cosmic-app-list/src/app.rs
 +++ b/cosmic-app-list/src/app.rs
-@@ -83,10 +83,66 @@ struct AppletIconData {
+@@ -82,10 +82,66 @@ struct AppletIconData {
  
  static DND_FAVORITES: u64 = u64::MAX;
  
@@ -70,7 +70,7 @@ index 3e5a3a6..6401423 100755
          let (h_padding, v_padding) = if applet.is_horizontal() {
              (major_padding as f32, cross_padding as f32)
          } else {
-@@ -136,6 +192,17 @@ impl AppletIconData {
+@@ -135,6 +191,17 @@ impl AppletIconData {
                  h_padding,
              ],
          };
@@ -88,7 +88,7 @@ index 3e5a3a6..6401423 100755
          AppletIconData {
              icon_size,
              icon_spacing,
-@@ -209,14 +276,24 @@ impl DockItem {
+@@ -208,14 +275,24 @@ impl DockItem {
          let toplevel_count = filtered_toplevels.len();
  
          let app_icon = AppletIconData::new(applet);
@@ -115,7 +115,7 @@ index 3e5a3a6..6401423 100755
  
          let indicator = {
              let container = if toplevel_count <= 1 {
-@@ -390,6 +467,9 @@ pub enum PopupType {
+@@ -388,6 +465,9 @@ pub enum PopupType {
  #[derive(Debug, Clone)]
  enum Message {
      Wayland(WaylandUpdate),
@@ -125,7 +125,7 @@ index 3e5a3a6..6401423 100755
      PinApp(u32),
      UnpinApp(u32),
      Popup(u32, window::Id),
-@@ -598,7 +678,22 @@ fn window_menu_style(selected: bool) -> cosmic::theme::Button {
+@@ -591,7 +671,22 @@ fn window_menu_style(selected: bool) -> cosmic::theme::Button {
      }
  }
  
@@ -149,7 +149,7 @@ index 3e5a3a6..6401423 100755
      Button::Custom {
          active: Box::new(move |focused, theme| {
              let a = button::Catalog::active(theme, focused, selected, &Button::AppletIcon);
-@@ -889,6 +984,51 @@ impl cosmic::Application for CosmicAppList {
+@@ -877,6 +972,51 @@ impl cosmic::Application for CosmicAppList {
  
      fn update(&mut self, message: Self::Message) -> app::Task<Self::Message> {
          match message {
@@ -201,7 +201,7 @@ index 3e5a3a6..6401423 100755
              Message::Popup(id, parent_window_id) => {
                  if let Some(Popup {
                      parent,
-@@ -1761,6 +1901,45 @@ impl cosmic::Application for CosmicAppList {
+@@ -1741,6 +1881,45 @@ impl cosmic::Application for CosmicAppList {
              PanelAnchor::Top | PanelAnchor::Bottom => true,
              PanelAnchor::Left | PanelAnchor::Right => false,
          };
@@ -247,7 +247,7 @@ index 3e5a3a6..6401423 100755
          let divider_padding = match self.core.applet.size {
              Size::Hardcoded(_) => 4,
              Size::PanelSize(ref s) => {
-@@ -1997,10 +2176,15 @@ impl cosmic::Application for CosmicAppList {
+@@ -1977,10 +2156,15 @@ impl cosmic::Application for CosmicAppList {
                  )
                  .drag_id(DND_FAVORITES),
                  row(active).spacing(app_icon.icon_spacing).into(),
@@ -267,7 +267,7 @@ index 3e5a3a6..6401423 100755
              )
          } else {
              (
-@@ -2072,6 +2256,22 @@ impl cosmic::Application for CosmicAppList {
+@@ -2052,6 +2236,22 @@ impl cosmic::Application for CosmicAppList {
              }
          }
  
@@ -290,7 +290,7 @@ index 3e5a3a6..6401423 100755
          self.core
              .applet
              .autosize_window(content)
-@@ -2506,6 +2706,11 @@ impl cosmic::Application for CosmicAppList {
+@@ -2484,6 +2684,11 @@ impl cosmic::Application for CosmicAppList {
  
      fn subscription(&self) -> Subscription<Message> {
          Subscription::batch([
@@ -302,7 +302,7 @@ index 3e5a3a6..6401423 100755
              wayland_subscription().map(Message::Wayland),
              listen_with(|e, _, id| match e {
                  cosmic::iced::core::Event::PlatformSpecific(event::PlatformSpecific::Wayland(
-@@ -2517,6 +2722,12 @@ impl cosmic::Application for CosmicAppList {
+@@ -2495,6 +2700,12 @@ impl cosmic::Application for CosmicAppList {
                  cosmic::iced::core::Event::Mouse(
                      cosmic::iced::core::mouse::Event::ButtonPressed(_),
                  ) => Some(Message::Pressed(id)),

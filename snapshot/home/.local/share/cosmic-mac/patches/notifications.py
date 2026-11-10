@@ -42,7 +42,7 @@ patch(L, [
     # clock tick
     (r"(            activation_token_subscription\(0\)\.map\(Message::Token\),\n        \]\))",
      "            activation_token_subscription(0).map(Message::Token),\n"
-     "            cosmic::iced::time::every(std::time::Duration::from_secs(2)).map(|_| Message::MacTick),\n        ])"),
+     "            cosmic::iced::Subscription::run(mac_widgets::minutes).map(|_| Message::MacTick),\n        ])"),
     # update arms
     (r"(    fn update\(&mut self, message: Self::Message\) -> app::Task<Self::Message> \{\n        match message \{\n            Message::TogglePopup => \{\n)",
      """    fn update(&mut self, message: Self::Message) -> app::Task<Self::Message> {
@@ -153,9 +153,12 @@ patch(L, [
 import os, shutil
 shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "mac_widgets.rs"),
             "cosmic-applet-notifications/src/mac_widgets.rs")
+# event-driven open requests (inotify), shared with the cosmic-mac applets
+shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared", "watch.rs"),
+            "cosmic-applet-notifications/src/mac_watch.rs")
 
 patch("cosmic-applet-notifications/Cargo.toml", [
-    (r'(jiff = "0\.2"\n)', r'\1serde_json = "1"\n'),
+    (r'(jiff = "0\.2"\n)', r'\1serde_json = "1"\ninotify = "0.11"\n'),
 ])
 
 patch(L, [
@@ -164,8 +167,8 @@ patch(L, [
     (r"(            \.is_ok_and\(\|v\| v\.trim\(\) == \"true\"\),\n        \};)",
      "            .is_ok_and(|v| v.trim() == \"true\"),\n            mac_widgets: Default::default(),\n        };"),
     (r"(    MacCalNext,\n)", "    MacCalNext,\n    MacWidgets(mac_widgets::Msg),\n"),
-    (r"(            cosmic::iced::time::every\(std::time::Duration::from_secs\(2\)\)\.map\(\|_\| Message::MacTick\),\n)",
-     "\\1            self.mac_widgets.subscription().map(Message::MacWidgets),\n"),
+    (r"(            cosmic::iced::Subscription::run\(mac_widgets::minutes\)\.map\(\|_\| Message::MacTick\),\n)",
+     "\\1            self.mac_widgets.subscription(self.popup.is_some()).map(Message::MacWidgets),\n"),
     (r"(            Message::MacCalPrev => \{\n)",
      "            Message::MacWidgets(mac_widgets::Msg::Close) => return self.update(Message::TogglePopup),\n"
      "            Message::MacWidgets(m) => {\n"

@@ -22,7 +22,7 @@ impl Network {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     pub enabled: bool,
     pub networks: Vec<Network>, // connected first, then strongest; one entry per SSID

@@ -12,7 +12,7 @@ pub struct Device {
     pub battery: Option<u8>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     pub available: bool,
     pub powered: bool,

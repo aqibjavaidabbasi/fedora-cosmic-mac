@@ -1,0 +1,8 @@
+[Unit]
+Description=COSMIC Mac rebuilds and cargo builds (capped at 80% of total CPU)
+
+[Slice]
+# 8 cores x 80% = 640%: builds can never take more than 80% of the whole machine.
+CPUQuota=640%
+# Lose to the desktop whenever it needs the CPU.
+CPUWeight=20

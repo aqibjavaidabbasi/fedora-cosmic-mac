@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Developer Services (Mac)
+Comment=Start and stop local development servers (databases, web servers)
+Type=Application
+Exec=cosmic-mac-dev
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Applet;Developer;Services;Database;Server;
+Icon=com.aqib.dev-symbolic
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=End
+X-OverflowPriority=10

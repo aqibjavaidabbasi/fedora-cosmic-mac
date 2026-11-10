@@ -2,24 +2,6 @@
     config: {
         [
             (
-                connector: "eDP-1",
-                make: "Sharp Corporation",
-                model: "LQ150P1JX51",
-            ),
-        ]: [
-            (
-                mode: ((2496, 1664), Some(59984)),
-                vrr: r#true,
-                scale: 1.0,
-                transform: Normal,
-                position: (0, 0),
-                enabled: r#true,
-                max_bpc: Some(12),
-                xwayland_primary: true,
-            ),
-        ],
-        [
-            (
                 connector: "DP-1",
                 make: "PNP(RGT)",
                 model: "0x5211",
@@ -68,7 +50,7 @@
                 vrr: r#false,
                 scale: 1.0,
                 transform: Normal,
-                position: (2496, 0),
+                position: (1997, 0),
                 enabled: r#true,
                 max_bpc: Some(12),
                 xwayland_primary: false,
@@ -76,12 +58,49 @@
             (
                 mode: ((2496, 1664), Some(59984)),
                 vrr: r#true,
-                scale: 1.0,
+                scale: 1.25,
                 transform: Normal,
                 position: (0, 166),
                 enabled: r#true,
                 max_bpc: Some(12),
                 xwayland_primary: true,
+            ),
+        ],
+        []: [],
+        [
+            (
+                connector: "DP-1",
+                make: "Samsung Electric Company",
+                model: "LF32TU87",
+            ),
+        ]: [
+            (
+                mode: ((3840, 2160), Some(60000)),
+                vrr: r#false,
+                scale: 1.0,
+                transform: Normal,
+                position: (0, 0),
+                enabled: r#true,
+                max_bpc: Some(12),
+                xwayland_primary: true,
+            ),
+        ],
+        [
+            (
+                connector: "eDP-1",
+                make: "Sharp Corporation",
+                model: "LQ150P1JX51",
+            ),
+        ]: [
+            (
+                mode: ((2496, 1664), Some(59984)),
+                vrr: r#true,
+                scale: 1.25,
+                transform: Normal,
+                position: (0, 0),
+                enabled: r#true,
+                max_bpc: Some(12),
+                xwayland_primary: false,
             ),
         ],
     },

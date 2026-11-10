@@ -61,6 +61,7 @@ cp "$S"/.local/share/applications/com.aqib.*.desktop ~/.local/share/applications
 mkdir -p ~/.local/share/icons/hicolor/symbolic/apps
 cp "$D"/*/data/icons/*.svg ~/.local/share/icons/hicolor/symbolic/apps/ 2>/dev/null || true
 cp "$S"/.config/systemd/user/cosmic-mac-* ~/.config/systemd/user/
+cp "$D"/systemd/cosmic-mac-*.service ~/.config/systemd/user/
 [ -f ~/.config/cosmic-mac/animation.conf ] || cp "$S/.config/cosmic-mac/animation.conf" ~/.config/cosmic-mac/
 
 step "Building the patched COSMIC parts and helper apps (takes a while)"
@@ -85,6 +86,10 @@ fi
 step "Enabling automatic rebuilds after COSMIC updates"
 systemctl --user daemon-reload
 systemctl --user enable --now cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path cosmic-mac-buttons.service
+# Battery saver: closes apps left unfocused for an hour on battery (~/.config/cosmic-mac/auto-quit.conf)
+systemctl --user enable cosmic-mac-autoquit.service
 
 "$R/check.sh" || true
 printf '\nDone. Log out, pick COSMIC on the login screen, and log back in.\n'
+printf 'Optional battery savers (lid closes to sleep, Developer menu without passwords, dev\n'
+printf 'servers not started at boot):  sudo bash %s/power/setup-root.sh\n' "$D"

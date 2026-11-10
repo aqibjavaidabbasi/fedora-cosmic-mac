@@ -7,6 +7,8 @@
 
 #[path = "../../shared/style.rs"]
 mod style;
+#[path = "../../shared/watch.rs"]
+mod watch;
 #[path = "../../shared/net.rs"]
 mod net;
 #[path = "../../shared/bt.rs"]
@@ -18,7 +20,7 @@ use std::time::Duration;
 
 use cosmic::{
     Element, Task, app,
-    iced::{Subscription, time, window},
+    iced::{Subscription, window},
     surface,
     widget::Column,
 };
@@ -42,8 +44,7 @@ struct Bluetooth {
 enum Message {
     TogglePopup,
     CloseRequested(window::Id),
-    Tick,
-    CheckOpen,
+    OpenRequest,
     Refreshed(bt::State),
     Enable(bool),
     Device(bt::Device),
@@ -126,12 +127,7 @@ impl cosmic::Application for Bluetooth {
                     self.popup = None;
                 }
             }
-            Message::Tick => return self.refresh(),
-            Message::CheckOpen => {
-                if style::open_requested(APP_ID) {
-                    return self.update(Message::TogglePopup);
-                }
-            }
+            Message::OpenRequest => return self.update(Message::TogglePopup),
             Message::Refreshed(state) => {
                 if let Some(mac) = &self.busy {
                     let before = self.state.devices.iter().find(|d| &d.mac == mac).map(|d| d.connected);
@@ -186,11 +182,13 @@ impl cosmic::Application for Bluetooth {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let period = if self.popup.is_some() { 2000 } else { 10000 };
-        Subscription::batch([
-            time::every(Duration::from_millis(period)).map(|_| Message::Tick),
-            time::every(Duration::from_millis(500)).map(|_| Message::CheckOpen),
-        ])
+        // bluetoothctl every 2 s while the menu is open, 10 s otherwise; a message (and a
+        // redraw) only when something changed.
+        let status = Subscription::run_with((self.popup.is_some(), self.show_nearby), |&(open, nearby)| {
+            let period = Duration::from_millis(if open { 2000 } else { 10000 });
+            watch::changes(period, move |_: Option<bt::State>| bt::gather(nearby))
+        });
+        Subscription::batch([status.map(Message::Refreshed), watch::open_requests(APP_ID).map(|_| Message::OpenRequest)])
     }
 
     fn on_close_requested(&self, id: window::Id) -> Option<Message> {

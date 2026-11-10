@@ -1,6 +1,6 @@
 (
     output: "all",
-    source: Path("/home/aqibj/Downloads/uwp5094102.png"),
+    source: Path("/home/aqibj/Downloads/peter-broomfield-m3m-lnR90uM-unsplash.jpg"),
     filter_by_theme: true,
     rotation_frequency: 300,
     filter_method: Lanczos,

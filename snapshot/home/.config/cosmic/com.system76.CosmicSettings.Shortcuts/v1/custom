@@ -1,3 +1,4 @@
 {
     (modifiers: [Super], key: "space"): System(Launcher),
+    (modifiers: [Super, Alt], key: "s", description: Some("Sleep")): Spawn("systemctl suspend"),
 }

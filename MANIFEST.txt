@@ -1,34 +1,36 @@
 # Installed COSMIC packages (rpm)
-cosmic-applets-1.8.0-1.fc44.x86_64
-cosmic-app-library-1.8.0-1.fc44.x86_64
-cosmic-bg-1.8.0-1.fc44.x86_64
-cosmic-comp-1.8.0-1.fc44.x86_64
+cosmic-applets-1.11.0-2.fc44.x86_64
+cosmic-app-library-1.11.0-2.fc44.x86_64
+cosmic-bg-1.11.0-2.fc44.x86_64
+cosmic-comp-1.11.0-2.fc44.x86_64
 cosmic-config-fedora-0~git.20241103.1.d35e087-5.fc44.noarch
-cosmic-edit-1.8.0-1.fc44.x86_64
-cosmic-greeter-1.8.0-3.fc44.x86_64
-cosmic-icon-theme-1.8.0-1.fc44.noarch
-cosmic-idle-1.8.0-1.fc44.x86_64
-cosmic-initial-setup-1.8.0-1.fc44.x86_64
-cosmic-launcher-1.8.0-1.fc44.x86_64
-cosmic-notifications-1.8.0-1.fc44.x86_64
-cosmic-osd-1.8.0-1.fc44.x86_64
-cosmic-panel-1.8.0-1.fc44.x86_64
-cosmic-player-1.8.0-1.fc44.x86_64
-cosmic-randr-1.8.0-1.fc44.x86_64
-cosmic-screenshot-1.8.0-1.fc44.x86_64
-cosmic-session-1.8.0-1.fc44.x86_64
-cosmic-settings-1.8.0-1.fc44.x86_64
-cosmic-settings-daemon-1.8.0-1.fc44.x86_64
-cosmic-store-1.8.0-1.fc44.x86_64
-cosmic-term-1.8.0-1.fc44.x86_64
-cosmic-wallpapers-1.8.0-1.fc44.noarch
-cosmic-workspaces-1.8.0-1.fc44.x86_64
+cosmic-edit-1.11.0-2.fc44.x86_64
+cosmic-files-1.11.0-2.fc44.x86_64
+cosmic-greeter-1.11.0-2.fc44.x86_64
+cosmic-icon-theme-1.11.0-2.fc44.noarch
+cosmic-idle-1.11.0-2.fc44.x86_64
+cosmic-initial-setup-1.11.0-2.fc44.x86_64
+cosmic-launcher-1.11.0-2.fc44.x86_64
+cosmic-notifications-1.11.0-2.fc44.x86_64
+cosmic-osd-1.11.0-2.fc44.x86_64
+cosmic-osk-1.11.0-2.fc44.x86_64
+cosmic-panel-1.11.0-2.fc44.x86_64
+cosmic-player-1.11.0-2.fc44.x86_64
+cosmic-randr-1.11.0-2.fc44.x86_64
+cosmic-screenshot-1.11.0-2.fc44.x86_64
+cosmic-session-1.11.0-2.fc44.x86_64
+cosmic-settings-1.11.0-2.fc44.x86_64
+cosmic-settings-daemon-1.11.0-2.fc44.x86_64
+cosmic-store-1.11.0-2.fc44.x86_64
+cosmic-term-1.11.0-2.fc44.x86_64
+cosmic-wallpapers-1.11.0-2.fc44.noarch
+cosmic-workspaces-1.11.0-2.fc44.x86_64
 
 # Flatpak applets (remote cosmic)
-com.dec05eba.gpu_screen_recorder	6.1.2	flathub
-com.github.codevardhan.caffeine-applet	0.1.0	cosmic
-io.github.cosmic_utils.minimon-applet	1.2.0	cosmic
-io.github.marcelogomes90.cosmic-ext-applet-status-hub	1.5.13	cosmic
+com.dec05eba.gpu_screen_recorder	6.1.7	flathub
+com.github.codevardhan.caffeine-applet	0.1.3	cosmic
+io.github.cosmic_utils.minimon-applet	1.3.0	cosmic
+io.github.marcelogomes90.cosmic-ext-applet-status-hub	1.6.0	cosmic
 
 # Third-party themes in ~/.local/share/icons (not stored here; install.sh downloads them)
 MacTahoe, MacTahoe-dark, MacTahoe-light  https://github.com/vinceliuice/MacTahoe-icon-theme

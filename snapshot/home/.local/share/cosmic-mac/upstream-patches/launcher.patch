@@ -1,5 +1,5 @@
 diff --git a/src/app.rs b/src/app.rs
-index 223bb5d..2b2c66a 100644
+index 9ab01dd..c6c2a88 100644
 --- a/src/app.rs
 +++ b/src/app.rs
 @@ -61,6 +61,66 @@ static SCROLLABLE: LazyLock<Id> = LazyLock::new(|| Id::new("scrollable"));
@@ -77,8 +77,8 @@ index 223bb5d..2b2c66a 100644
      Backspace,
      TabPress,
      CompleteFocusedId(Id),
-@@ -250,7 +311,7 @@ impl CosmicLauncher {
-                 anchor: Anchor::TOP,
+@@ -251,7 +312,7 @@ impl CosmicLauncher {
+                 margin: app.layer_margin(),
                  namespace: "launcher".into(),
                  size: None,
 -                size_limits: Limits::NONE.min_width(1.0).min_height(1.0).max_width(600.0),
@@ -86,7 +86,7 @@ index 223bb5d..2b2c66a 100644
                  exclusive_zone: -1,
                  ..Default::default()
              },
-@@ -440,6 +501,20 @@ impl cosmic::Application for CosmicLauncher {
+@@ -441,6 +502,20 @@ impl cosmic::Application for CosmicLauncher {
      #[allow(clippy::too_many_lines)]
      fn update(&mut self, message: Message) -> Task<Self::Message> {
          match message {
@@ -107,7 +107,7 @@ index 223bb5d..2b2c66a 100644
              Message::InputChanged(value) => {
                  self.input_value.clone_from(&value);
                  self.focused = 0;
-@@ -907,256 +982,214 @@ impl cosmic::Application for CosmicLauncher {
+@@ -908,254 +983,214 @@ impl cosmic::Application for CosmicLauncher {
      #[allow(clippy::too_many_lines)]
      fn view_window(&self, id: SurfaceId) -> Element<'_, Self::Message> {
          if id == self.window_id {
@@ -401,6 +401,20 @@ index 223bb5d..2b2c66a 100644
 -                    .height(Length::Shrink)
 -                    .spacing(16)
 -            };
+-
+-            if buttons.len() > SCROLL_MIN {
+-                content = content.push(
+-                    container(scrollable(components::list::column(buttons)).id(SCROLLABLE.clone()))
+-                        .max_height(504),
+-                );
+-            } else if !buttons.is_empty() {
+-                content = content.push(components::list::column(buttons));
+-            }
+-
+-            let window = Column::new().push(
+-                container(id_container(content, MAIN_ID.clone()))
+-                    .width(Length::Shrink)
+-                    .height(Length::Shrink)
 +            // Suggestions only once something is typed (the switcher always lists windows).
 +            let show_rows = !rows.is_empty() && (self.alt_tab || !self.input_value.is_empty());
 +            let results = show_rows.then(|| {
@@ -413,31 +427,37 @@ index 223bb5d..2b2c66a 100644
 +                container(list)
 +                    .padding(8)
 +                    .width(Length::Fixed(if self.alt_tab { 600.0 } else { MAC_BAR_W }))
-+                    .class(Container::Custom(Box::new(|theme| {
-+                        let t = theme.cosmic();
+                     .class(Container::Custom(Box::new(|theme| {
+                         let t = theme.cosmic();
+-                        let radii = t.radius_s().map(|x| if x < 4.0 { x } else { x + 4.0 });
+-
 +                        let mut bg: Color = t.background(theme.transparent).base.into();
 +                        bg.a = bg.a.max(0.94);
-+                        container::Style {
-+                            text_color: Some(t.on_bg_color().into()),
-+                            icon_color: Some(t.on_bg_color().into()),
+                         container::Style {
+                             text_color: Some(t.on_bg_color().into()),
+                             icon_color: Some(t.on_bg_color().into()),
+-                            background: Some(
+-                                Color::from(t.background(theme.transparent).base).into(),
+-                            ),
 +                            background: Some(bg.into()),
-+                            border: Border {
+                             border: Border {
+-                                radius: radii.into(),
 +                                radius: 22.0.into(),
-+                                width: 1.0,
+                                 width: 1.0,
+-                                color: t.bg_divider().into(),
 +                                color: if t.is_dark { Color::from_rgba(1.0, 1.0, 1.0, 0.12) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.08) },
-+                            },
-+                            shadow: Shadow::default(),
-+                            snap: true,
-+                        }
-+                    })))
+                             },
+                             shadow: Shadow::default(),
+                             snap: true,
+                         }
+                     })))
+-                    .padding([24, 32]),
+-            );
 +            });
- 
--            if buttons.len() > SCROLL_MIN {
++
 +            let mut content = Column::new().spacing(10).align_x(Alignment::Start);
 +            if !self.alt_tab {
-                 content = content.push(
--                    container(scrollable(components::list::column(buttons)).id(SCROLLABLE.clone()))
--                        .max_height(504),
++                content = content.push(
 +                    row![
 +                        launcher_entry,
 +                        circle("view-app-grid-symbolic", "apps"),
@@ -447,17 +467,8 @@ index 223bb5d..2b2c66a 100644
 +                    ]
 +                    .spacing(10)
 +                    .align_y(Alignment::Center),
-                 );
--            } else if !buttons.is_empty() {
--                content = content.push(components::list::column(buttons));
-             }
--
--            let window = Column::new()
--                .push(vertical_space().height(Length::Fixed(self.margin + 16.)))
--                .push(
--                    container(id_container(content, MAIN_ID.clone()))
--                        .width(Length::Shrink)
--                        .height(Length::Shrink)
++                );
++            }
 +            if self.alt_tab {
 +                // macOS Command-Tab: one row of big icons, the selected one highlighted
 +                // with its name underneath.
@@ -495,33 +506,24 @@ index 223bb5d..2b2c66a 100644
 +                content = content.push(
 +                    container(strip)
 +                        .padding([14, 14, 8, 14])
-                         .class(Container::Custom(Box::new(|theme| {
-                             let t = theme.cosmic();
--                            let radii = t.radius_s().map(|x| if x < 4.0 { x } else { x + 4.0 });
--
++                        .class(Container::Custom(Box::new(|theme| {
++                            let t = theme.cosmic();
 +                            let mut bg: Color = t.background(theme.transparent).base.into();
 +                            bg.a = bg.a.max(0.9);
-                             container::Style {
-                                 text_color: Some(t.on_bg_color().into()),
-                                 icon_color: Some(t.on_bg_color().into()),
--                                background: Some(
--                                    Color::from(t.background(theme.transparent).base).into(),
--                                ),
++                            container::Style {
++                                text_color: Some(t.on_bg_color().into()),
++                                icon_color: Some(t.on_bg_color().into()),
 +                                background: Some(bg.into()),
-                                 border: Border {
--                                    radius: radii.into(),
++                                border: Border {
 +                                    radius: 26.0.into(),
-                                     width: 1.0,
--                                    color: t.bg_divider().into(),
++                                    width: 1.0,
 +                                    color: if t.is_dark { Color::from_rgba(1.0, 1.0, 1.0, 0.12) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.08) },
-                                 },
-                                 shadow: Shadow::default(),
-                                 snap: true,
-                             }
--                        })))
--                        .padding([24, 32]),
++                                },
++                                shadow: Shadow::default(),
++                                snap: true,
++                            }
 +                        }))),
-                 );
++                );
 +            } else if let Some(r) = results {
 +                content = content.push(r);
 +            }

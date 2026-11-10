@@ -11,6 +11,8 @@ mod energy;
 mod power;
 #[path = "../../shared/style.rs"]
 mod style;
+#[path = "../../shared/watch.rs"]
+mod watch;
 
 use std::time::Duration;
 
@@ -50,7 +52,7 @@ enum Message {
     LowPowerDone(Result<(), String>),
     SampleEnergy,
     OpenSettings,
-    CheckOpenRequest,
+    OpenRequest,
 }
 
 /// Run a command in the background, reaping it on a thread.
@@ -167,11 +169,7 @@ impl cosmic::Application for Battery {
             Message::LowPowerDone(Ok(())) => {}
             Message::LowPowerDone(Err(e)) => self.error = Some(e),
             Message::SampleEnergy => self.heavy_apps = self.sampler.sample(),
-            Message::CheckOpenRequest => {
-                if style::open_requested(APP_ID) {
-                    return self.update(Message::TogglePopup);
-                }
-            }
+            Message::OpenRequest => return self.update(Message::TogglePopup),
             Message::OpenSettings => {
                 run("cosmic-settings", &["power"]);
                 return self.close_popup();
@@ -279,7 +277,7 @@ impl cosmic::Application for Battery {
 
     fn subscription(&self) -> Subscription<Message> {
         let power = power::subscription().map(Message::Power);
-        let open = time::every(Duration::from_millis(500)).map(|_| Message::CheckOpenRequest);
+        let open = watch::open_requests(APP_ID).map(|_| Message::OpenRequest);
         if self.popup.is_some() {
             Subscription::batch([power, open, time::every(Duration::from_secs(3)).map(|_| Message::SampleEnergy)])
         } else {

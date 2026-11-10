@@ -16,5 +16,5 @@ if [ -n "$want" ] && [ "$want" = "$have" ] && [ -x "$D/bin/cosmic-comp" ]; then
     exec "$D/bin/cosmic-comp" "$@"
 fi
 
-systemd-run --user --quiet --collect --unit=cosmic-mac-rebuild-login "$D/rebuild.sh" >/dev/null 2>&1 || true
+systemd-run --user --quiet --collect --slice=cosmic-mac-build.slice --unit=cosmic-mac-rebuild-login "$D/rebuild.sh" >/dev/null 2>&1 || true
 exec /usr/bin/cosmic-comp "$@"

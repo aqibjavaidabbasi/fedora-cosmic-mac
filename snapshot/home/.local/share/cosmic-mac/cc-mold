@@ -1,0 +1,4 @@
+#!/bin/sh
+# Linker for cosmic-mac rebuilds: the system C compiler driver, linking with mold when installed.
+command -v mold >/dev/null 2>&1 && exec cc -fuse-ld=mold "$@"
+exec cc "$@"

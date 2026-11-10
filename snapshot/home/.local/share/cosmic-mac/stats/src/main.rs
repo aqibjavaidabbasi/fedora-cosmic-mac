@@ -4,16 +4,19 @@
 //! Popover (macOS menu styling): CPU with top processes, Memory, Network, Disk,
 //! then "Activity Monitor…".
 //! Settings: ~/.config/cosmic-mac/stats.conf  (SHOW=cpu,memory,network,disk).
-//! Reads /proc and statvfs directly; nothing runs in the background but a 2 s tick.
+//! Reads /proc and statvfs directly. Samples every 2 s on mains power and 5 s on battery
+//! (2 s while the popover is open), and only redraws when a value shown in the bar changes.
 
 #[path = "../../shared/style.rs"]
 mod style;
+#[path = "../../shared/watch.rs"]
+mod watch;
 
 use std::{collections::HashMap, time::Duration};
 
 use cosmic::{
     Element, Task, app,
-    iced::{Alignment, Background, Border, Color, Length, Subscription, time, window},
+    iced::{Alignment, Background, Border, Color, Length, Subscription, futures::{SinkExt, channel::mpsc::Sender}, stream, window},
     surface,
     theme::{self, Button},
     widget::{Column, Row, button, container, icon, row, space, text},
@@ -117,11 +120,14 @@ fn net_bytes() -> (u64, u64) {
 }
 
 fn disk() -> (u64, u64) {
-    // `df -B1 /` → used, size
-    let out = std::process::Command::new("df").args(["-B1", "--output=used,size", "/"]).output();
-    let text = out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
-    let v: Vec<u64> = text.lines().nth(1).unwrap_or("").split_whitespace().filter_map(|x| x.parse().ok()).collect();
-    (v.first().copied().unwrap_or(0), v.get(1).copied().unwrap_or(0))
+    // used and size of /, as `df` counts them
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c"/".as_ptr(), &mut st) } != 0 {
+        return (0, 0);
+    }
+    let block = st.f_frsize as u64;
+    let total = st.f_blocks as u64 * block;
+    (total.saturating_sub(st.f_bfree as u64 * block), total)
 }
 
 fn process_ticks() -> HashMap<u32, u64> {
@@ -140,7 +146,7 @@ fn process_ticks() -> HashMap<u32, u64> {
 }
 
 impl Sampler {
-    fn sample(&mut self, with_processes: bool) -> Snapshot {
+    fn sample(&mut self, with_processes: bool, with_disk: bool) -> Snapshot {
         let mut s = Snapshot::default();
         if let Some((busy, total)) = cpu_times() {
             if let Some((pb, pt)) = self.cpu_prev {
@@ -185,7 +191,9 @@ impl Sampler {
             s.up = tx.saturating_sub(ptx) as f64 / secs;
         }
         self.net_prev = Some((rx, tx, now));
-        (s.disk_used, s.disk_total) = disk();
+        if with_disk {
+            (s.disk_used, s.disk_total) = disk();
+        }
         s
     }
 }
@@ -233,7 +241,6 @@ fn meter<'a, M: 'static>(percent: f32) -> Element<'a, M> {
 struct Stats {
     core: app::Core,
     popup: Option<window::Id>,
-    sampler: Sampler,
     snap: Snapshot,
     show: Vec<Meter>,
 }
@@ -242,8 +249,8 @@ struct Stats {
 enum Message {
     TogglePopup,
     CloseRequested(window::Id),
-    Tick,
-    CheckOpen,
+    Sampled(Snapshot, Vec<Meter>),
+    OpenRequest,
     OpenMonitor,
 }
 
@@ -255,15 +262,39 @@ impl Stats {
         }
     }
 
-    fn bar_value(&self, m: Meter) -> (&'static str, String) {
-        let s = &self.snap;
-        match m {
-            Meter::Cpu => ("cpu-symbolic", format!("{:.0}%", s.cpu)),
-            Meter::Memory => ("ram-symbolic", format!("{:.0}%", pct(s.mem_used, s.mem_total))),
-            Meter::Network => ("go-down-symbolic", rate(s.down)),
-            Meter::Disk => ("drive-harddisk-symbolic", format!("{:.0}%", pct(s.disk_used, s.disk_total))),
-        }
+}
+
+fn bar_value(s: &Snapshot, m: Meter) -> (&'static str, String) {
+    match m {
+        Meter::Cpu => ("cpu-symbolic", format!("{:.0}%", s.cpu)),
+        Meter::Memory => ("ram-symbolic", format!("{:.0}%", pct(s.mem_used, s.mem_total))),
+        Meter::Network => ("go-down-symbolic", rate(s.down)),
+        Meter::Disk => ("drive-harddisk-symbolic", format!("{:.0}%", pct(s.disk_used, s.disk_total))),
     }
+}
+
+/// Samples in the background and sends a snapshot only when the bar text changes, or
+/// every sample while the popover is open.
+fn sampler(open: bool) -> impl cosmic::iced::futures::Stream<Item = (Snapshot, Vec<Meter>)> {
+    stream::channel(1, move |mut tx: Sender<(Snapshot, Vec<Meter>)>| async move {
+        let mut sampler = Sampler::default();
+        let mut last = String::new();
+        sampler.sample(open, false); // prime the counters
+        loop {
+            let secs = if open || !watch::on_battery() { 2 } else { 5 };
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+            // re-read: picks up changes made in Control Center → Edit Controls
+            let show = load_show();
+            let snap = sampler.sample(open, open || show.contains(&Meter::Disk));
+            let bar: String = show.iter().map(|m| bar_value(&snap, *m).1 + " ").collect();
+            if open || bar != last {
+                last = bar;
+                if tx.send((snap, show)).await.is_err() {
+                    return;
+                }
+            }
+        }
+    })
 }
 
 impl cosmic::Application for Stats {
@@ -274,7 +305,7 @@ impl cosmic::Application for Stats {
 
     fn init(core: app::Core, _flags: ()) -> (Self, app::Task<Message>) {
         let mut app = Self { core, show: load_show(), ..Default::default() };
-        app.snap = app.sampler.sample(false);
+        app.snap = Sampler::default().sample(false, true);
         (app, Task::none())
     }
 
@@ -293,7 +324,6 @@ impl cosmic::Application for Stats {
                     return self.close_popup();
                 }
                 self.show = load_show();
-                self.sampler.sample(true); // prime the per-process counters
                 let new_id = window::Id::unique();
                 return surface::surface_task(surface::action::app_popup(
                     |_| Default::default(),
@@ -309,15 +339,16 @@ impl cosmic::Application for Stats {
                     self.popup = None;
                 }
             }
-            Message::Tick => {
-                self.snap = self.sampler.sample(self.popup.is_some());
-                self.show = load_show(); // picks up changes made in Control Center → Edit Controls
-            }
-            Message::CheckOpen => {
-                if style::open_requested(APP_ID) {
-                    return self.update(Message::TogglePopup);
+            Message::Sampled(snap, show) => {
+                // keep the last disk numbers when the bar does not show the disk
+                let disk = (self.snap.disk_used, self.snap.disk_total);
+                self.snap = snap;
+                if self.snap.disk_total == 0 {
+                    (self.snap.disk_used, self.snap.disk_total) = disk;
                 }
+                self.show = show;
             }
+            Message::OpenRequest => return self.update(Message::TogglePopup),
             Message::OpenMonitor => {
                 if let Ok(mut c) = std::process::Command::new("gnome-system-monitor").spawn() {
                     std::thread::spawn(move || {
@@ -334,7 +365,7 @@ impl cosmic::Application for Stats {
         let (size, _) = self.core.applet.suggested_size(true);
         let mut r = Row::new().spacing(10).align_y(Alignment::Center);
         for m in &self.show {
-            let (glyph, value) = self.bar_value(*m);
+            let (glyph, value) = bar_value(&self.snap, *m);
             r = r.push(
                 row![icon::from_name(glyph).size(size).symbolic(true), self.core.applet.text(value)]
                     .spacing(3)
@@ -414,8 +445,8 @@ impl cosmic::Application for Stats {
 
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
-            time::every(Duration::from_secs(2)).map(|_| Message::Tick),
-            time::every(Duration::from_millis(500)).map(|_| Message::CheckOpen),
+            Subscription::run_with(self.popup.is_some(), |open| sampler(*open)).map(|(snap, show)| Message::Sampled(snap, show)),
+            watch::open_requests(APP_ID).map(|_| Message::OpenRequest),
         ])
     }
 

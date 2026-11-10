@@ -14,12 +14,16 @@ A macOS-style COSMIC desktop for Fedora. It survives COSMIC and Fedora updates w
 - **Top-bar popovers:** Control Center, Wi-Fi, Bluetooth, Battery, System Monitor and the menu-bar menus use the same frosted glass as the Settings sidebar. They use a glossy glass: a lighter top edge and a translucent tint over the blurred background. Tray apps listed in `~/.config/cosmic-mac/tray-popovers` (Clippy by default) open their window right under the tray icon you clicked, with keyboard focus, like a macOS menu-bar popover.
 - **Window title bars:** macOS traffic lights on the left (14px, grey when the window is in the background) for GTK apps (Files, Firefox…), COSMIC's own apps (Terminal, Text Editor, Media Player) and every window whose title bar COSMIC draws (Electron, Qt, X11 apps with the system title bar). Drag the bar to move, double-click to zoom.
 - **Notifications:** banners are rounded frosted cards like macOS (app icon, small app name, bold title, message, close button) with a soft drop shadow, wider than before, and bigger text and icons on 2K and 4K displays (about 1.2x at 2560 wide, 1.5x at 3840 wide).
-- **Claude Desktop title bar:** the Claude app draws its own window buttons, so `claude-titlebar.sh` makes a patched copy (instant, no extra disk space; the system package is never touched) that uses the normal system title bar, plus a launcher `claude-desktop-mac` that the app's menu entry now starts. The launcher re-creates the copy when the package updates; run `~/.local/share/cosmic-mac/claude-titlebar.sh --remove` to go back to the stock app.
+- **Claude Desktop title bar:** the Claude app draws its own window buttons, so `claude-titlebar.sh` makes a patched copy (instant, no extra disk space; the system package is never touched) that uses the normal system title bar, plus a launcher `claude-desktop-mac` that the app's menu entry now starts. The launcher runs the app natively on Wayland instead of through Xwayland (cheaper on battery, sharp on scaled displays; COSMIC still draws the title bar); start it with `CLAUDE_USE_WAYLAND=0` to go back to Xwayland. The launcher re-creates the copy when the package updates; run `~/.local/share/cosmic-mac/claude-titlebar.sh --remove` to go back to the stock app.
 - **System alerts:** Log Out, Restart and Shut Down confirmations and password prompts are small macOS-style cards: icon on top, bold centered title, capsule buttons with the default one in blue.
 - **Spotlight:** Super+Space opens a centered Spotlight Search pill with Apps, Files, Shortcuts and Settings buttons; suggestions appear as you type.
 - **System Settings:** a macOS-style sidebar (search on top, colored icons, grouped pages).
 - **App switcher:** Alt+Tab shows a macOS Command-Tab style row of big app icons, with the selected app's name under it.
 - **Extras:** overview thumbnails are centered, and there are a Mac-style system monitor and a caffeine applet.
+- **Developer menu:** a code-brackets item in the top bar (filled while any server runs) with a **Developer Services** switch (all on / all off) and one switch per service: MariaDB, PostgreSQL, nginx, PHP-FPM, Supervisor and Supervisor Studio. Edit the list with **Edit Services…** (`~/.config/cosmic-mac/dev-services`, one `unit Label` per line, `--user` in front of user units). Once `power/setup-root.sh` has run, the servers no longer start at boot and the switches need no password.
+- **Sleep:** a Sleep tile in the Control Center, Sleep in the logo menu, and **Super+Alt+S** (this replaces COSMIC's default Screen Reader shortcut; the screen reader stays in Settings > Accessibility). With `power/setup-root.sh`, closing the lid sleeps too (not while an external display is connected).
+- **Auto-quit idle apps:** on battery, an app none of whose windows was focused for an hour gets a normal close request, like clicking its close button (unsaved work still asks; nothing is killed). Chat apps, browsers, terminals, editors, media players, the COSMIC shell and apps playing sound are left alone. Settings in `~/.config/cosmic-mac/auto-quit.conf`; `cosmic-mac-autoquit --list` shows each open app's id, and `journalctl --user -u cosmic-mac-autoquit` what was closed.
+- **Light on battery:** the top-bar items do no work while idle. They wait for events instead of polling (opening a menu from a shortcut, the focused app), check Wi-Fi, Bluetooth and the Developer menu on a slow timer, and redraw only when what they show changes. The system monitor samples every 2 s on power and every 5 s on battery. `power/measure.sh` samples battery draw, wakeups and CPU use.
 
 ## Install on a new computer
 
@@ -47,6 +51,12 @@ What `install.sh` does:
 Your wallpaper and dock apps are kept. To copy the original owner's exact desktop instead, including wallpaper, pinned apps and every setting, run `./install.sh --restore`.
 
 Run `./check.sh` any time to see that everything is active.
+
+Optional, for battery life (needs your password once): closing the lid sleeps, the Developer menu starts and stops servers without a password, and the dev servers no longer start at boot. `undo-root.sh` reverses it.
+
+```bash
+sudo bash ~/.local/share/cosmic-mac/power/setup-root.sh
+```
 
 ## Updating Fedora or COSMIC safely
 
@@ -126,7 +136,7 @@ Inside `snapshot/home/`:
 
 | Path | What it is |
 | --- | --- |
-| `.local/share/cosmic-mac/` | The toolkit: `rebuild.sh`, `apply-settings.sh`, `patches/`, `upstream-patches/`, and the sources of the Control Center, Battery, maximize helper and theme tool |
+| `.local/share/cosmic-mac/` | The toolkit: `rebuild.sh`, `apply-settings.sh`, `patches/`, `upstream-patches/`, `power/` (root setup for the battery savers, and a measuring script), `systemd/` (the auto-quit service), and the sources of the Control Center, Battery, Developer menu, auto-quit daemon, maximize helper and theme tool |
 | `.local/bin/cosmic-*` | Launchers that pick the customized or the stock COSMIC program |
 | `.config/cosmic/` | Every COSMIC setting of the original desktop, used by `--restore` |
 | `.config/cosmic-mac/` | Swipe and animation tuning |
@@ -137,7 +147,8 @@ Compiled programs, upstream source checkouts, and the large icon themes are not 
 ## Uninstall
 
 ```bash
-systemctl --user disable --now cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path
+systemctl --user disable --now cosmic-mac-rebuild.timer cosmic-mac-panel-contrast.path cosmic-mac-autoquit.service
+sudo bash ~/.local/share/cosmic-mac/power/undo-root.sh   # if you ran setup-root.sh
 rm ~/.local/bin/cosmic-comp ~/.local/bin/cosmic-panel ~/.local/bin/cosmic-panel-button \
    ~/.local/bin/cosmic-workspaces ~/.local/bin/cosmic-applet-notifications \
    ~/.local/bin/cosmic-mac-* ~/.local/bin/cosmic-maximize-to-workspace \

@@ -1,8 +1,8 @@
 diff --git a/src/app.rs b/src/app.rs
-index 11de300..24c6c68 100644
+index c579d35..f64cd65 100644
 --- a/src/app.rs
 +++ b/src/app.rs
-@@ -238,6 +238,9 @@ pub enum SurfaceState {
+@@ -237,6 +237,9 @@ pub enum SurfaceState {
      WaitingToBeShown,
  }
  
@@ -12,7 +12,7 @@ index 11de300..24c6c68 100644
  struct CosmicAppLibrary {
      search_value: String,
      entry_path_input: Vec<Arc<DesktopEntryData>>,
-@@ -262,6 +265,9 @@ struct CosmicAppLibrary {
+@@ -261,6 +264,9 @@ struct CosmicAppLibrary {
      overlap: HashMap<String, Rectangle>,
      margin: f32,
      size: iced::Size,
@@ -22,7 +22,7 @@ index 11de300..24c6c68 100644
      needs_clear: bool,
      focused_id: Option<widget::Id>,
      entry_ids: Vec<widget::Id>,
-@@ -299,6 +305,9 @@ impl Default for CosmicAppLibrary {
+@@ -298,6 +304,9 @@ impl Default for CosmicAppLibrary {
              app_list_config: Default::default(),
              overlap: Default::default(),
              margin: Default::default(),
@@ -32,7 +32,7 @@ index 11de300..24c6c68 100644
              size: Size::ZERO,
              needs_clear: Default::default(),
              focused_id: Default::default(),
-@@ -375,6 +384,7 @@ impl CosmicAppLibrary {
+@@ -398,6 +407,7 @@ impl CosmicAppLibrary {
              self.search_value = "".to_string();
              self.scroll_offset = 0.0;
              self.cur_group = None;
@@ -40,7 +40,7 @@ index 11de300..24c6c68 100644
              self.load_apps();
              self.needs_clear = true;
              let fetch_gpus = Task::perform(try_get_gpus(), |gpus| {
-@@ -423,7 +433,7 @@ impl CosmicAppLibrary {
+@@ -446,7 +456,7 @@ impl CosmicAppLibrary {
          let margin = self.layer_padding();
          cmds.push(set_padding::<()>(SurfaceId::RESERVED, margin).discard());
          cmds.push(
@@ -49,7 +49,7 @@ index 11de300..24c6c68 100644
                  task::effect(Action::PlatformSpecific(
                      platform_specific::Action::Wayland(
                          cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
-@@ -454,10 +464,10 @@ impl CosmicAppLibrary {
+@@ -477,10 +487,10 @@ impl CosmicAppLibrary {
      fn layer_padding(&self) -> IcedMargin {
          IcedMargin {
              #[allow(clippy::cast_possible_truncation)]
@@ -64,7 +64,7 @@ index 11de300..24c6c68 100644
          }
      }
  
-@@ -525,6 +535,8 @@ enum Message {
+@@ -548,6 +558,8 @@ enum Message {
      AppListConfig(AppListConfig),
      Opened(Size, SurfaceId),
      Overlap(OverlapNotifyEvent),
@@ -73,7 +73,7 @@ index 11de300..24c6c68 100644
      Output(OutputEvent),
  }
  
-@@ -703,6 +715,29 @@ impl cosmic::Application for CosmicAppLibrary {
+@@ -726,6 +738,29 @@ impl cosmic::Application for CosmicAppLibrary {
  
      fn update(&mut self, message: Message) -> Task<Self::Message> {
          match message {
@@ -103,7 +103,7 @@ index 11de300..24c6c68 100644
              Message::Activate => {
                  return self.activate();
              }
-@@ -720,6 +755,7 @@ impl cosmic::Application for CosmicAppLibrary {
+@@ -743,6 +778,7 @@ impl cosmic::Application for CosmicAppLibrary {
                      .as_ref()
                      .and_then(|focused| self.entry_ids.iter().position(|i| i == focused))
                      .unwrap_or(0);
@@ -111,7 +111,7 @@ index 11de300..24c6c68 100644
                  let y =
                      ((i / 7) as f32 / ((self.entry_path_input.len() / 7) as f32).max(1.)).max(0.0);
  
-@@ -829,6 +865,7 @@ impl cosmic::Application for CosmicAppLibrary {
+@@ -852,6 +888,7 @@ impl cosmic::Application for CosmicAppLibrary {
              }
              Message::InputChanged(value) => {
                  self.search_value = value;
@@ -119,7 +119,7 @@ index 11de300..24c6c68 100644
                  return self.filter_apps();
              }
              Message::Layer(e, id) => {
-@@ -905,6 +942,7 @@ impl cosmic::Application for CosmicAppLibrary {
+@@ -932,6 +969,7 @@ impl cosmic::Application for CosmicAppLibrary {
                  self.edit_name = None;
                  self.search_value.clear();
                  self.cur_group = group;
@@ -127,7 +127,7 @@ index 11de300..24c6c68 100644
                  self.scroll_offset = 0.0;
                  self.scrollable_id = Id::new(format!("group-{}", group.unwrap_or(usize::MAX)));
                  let mut cmds = vec![self.filter_apps()];
-@@ -1466,309 +1504,7 @@ impl cosmic::Application for CosmicAppLibrary {
+@@ -1499,306 +1537,7 @@ impl cosmic::Application for CosmicAppLibrary {
              return autosize(dialog, DELETE_GROUP_AUTOSIZE_ID.clone()).into();
          }
  
@@ -219,13 +219,10 @@ index 11de300..24c6c68 100644
 -            .zip(self.entry_icon_handles.iter())
 -            .enumerate()
 -            .map(|(i, ((entry, id), icon_handle))| {
--                let gpu_idx = self.gpus.as_ref().map(|gpus| {
--                    if entry.prefers_dgpu {
--                        gpus.iter().position(|gpu| !gpu.default).unwrap_or(0)
--                    } else {
--                        gpus.iter().position(|gpu| gpu.default).unwrap_or(0)
--                    }
--                });
+-                let gpu_idx = self
+-                    .gpus
+-                    .as_deref()
+-                    .and_then(|gpus| gpu_environment_override_idx(gpus, entry.prefers_dgpu));
 -                let dup = entry
 -                    .path
 -                    .as_ref()
@@ -438,7 +435,7 @@ index 11de300..24c6c68 100644
      }
  
      fn subscription(&self) -> Subscription<Message> {
-@@ -1831,6 +1567,14 @@ impl cosmic::Application for CosmicAppLibrary {
+@@ -1861,6 +1600,14 @@ impl cosmic::Application for CosmicAppLibrary {
                      }
                      _ => None,
                  },

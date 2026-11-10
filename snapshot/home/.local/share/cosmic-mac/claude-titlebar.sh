@@ -8,6 +8,9 @@
 # which that one window option is changed to the normal system title bar, plus a launcher
 # ~/.local/bin/claude-desktop-mac that starts the copy and re-creates it when the package
 # updates. The system package is never modified.
+# The launcher also runs the app natively on Wayland (CLAUDE_USE_WAYLAND=1) instead of
+# through Xwayland: cheaper on battery, sharp on scaled displays, and COSMIC still draws
+# the title bar (server-side decorations). Start it with CLAUDE_USE_WAYLAND=0 to go back.
 #
 #   claude-titlebar.sh --ensure   re-create the copy if the installed version changed
 #   claude-titlebar.sh --force    re-create it now
@@ -47,7 +50,9 @@ PY
         -e "s|^app_dir=.*|app_dir=\"$DST\"|" \
         -e '/^source "\/usr\/lib\/claude-desktop-unofficial\/launcher-common.sh"/a \
 # cosmic-mac: re-create the patched copy first if the installed version changed\
-"$HOME/.local/share/cosmic-mac/claude-titlebar.sh" --ensure >/dev/null 2>\&1 || true' \
+"$HOME/.local/share/cosmic-mac/claude-titlebar.sh" --ensure >/dev/null 2>\&1 || true\
+# cosmic-mac: native Wayland (COSMIC draws the title bar); CLAUDE_USE_WAYLAND=0 for Xwayland\
+export CLAUDE_USE_WAYLAND="${CLAUDE_USE_WAYLAND:-1}"' \
         /usr/bin/claude-desktop-unofficial > "$BIN.tmp"
     chmod +x "$BIN.tmp"
     mv -f "$BIN.tmp" "$BIN"   # replace atomically: the launcher may be running

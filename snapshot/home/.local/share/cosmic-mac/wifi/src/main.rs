@@ -3,10 +3,13 @@
 //! Panel: Wi-Fi waves showing signal strength.
 //! Popover (macOS Tahoe layout): Wi-Fi switch, Weak Security…, Known Networks,
 //! Other Networks (expandable), Wi-Fi Settings…  The same menu is drawn inside the
-//! Control Center (shared/menus.rs). Talks to NetworkManager through nmcli.
+//! Control Center (shared/menus.rs). Talks to NetworkManager through nmcli; the bar
+//! is only redrawn when the Wi-Fi state changes (shared/watch.rs).
 
 #[path = "../../shared/style.rs"]
 mod style;
+#[path = "../../shared/watch.rs"]
+mod watch;
 #[path = "../../shared/net.rs"]
 mod net;
 #[path = "../../shared/bt.rs"]
@@ -18,7 +21,7 @@ use std::time::Duration;
 
 use cosmic::{
     Element, Task, app,
-    iced::{Subscription, time, window},
+    iced::{Subscription, window},
     surface,
     widget::Column,
 };
@@ -42,8 +45,7 @@ struct Wifi {
 enum Message {
     TogglePopup,
     CloseRequested(window::Id),
-    Tick,
-    CheckOpen,
+    OpenRequest,
     Refreshed(net::State),
     Enable(bool),
     Connect(net::Network),
@@ -127,12 +129,7 @@ impl cosmic::Application for Wifi {
                     self.popup = None;
                 }
             }
-            Message::Tick => return self.refresh(false),
-            Message::CheckOpen => {
-                if style::open_requested(APP_ID) {
-                    return self.update(Message::TogglePopup);
-                }
-            }
+            Message::OpenRequest => return self.update(Message::TogglePopup),
             Message::Refreshed(state) => {
                 if self.connecting.as_ref().is_some_and(|c| state.current().is_some_and(|n| &n.ssid == c)) {
                     self.connecting = None;
@@ -188,11 +185,14 @@ impl cosmic::Application for Wifi {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let period = if self.popup.is_some() { 2000 } else { 5000 };
-        Subscription::batch([
-            time::every(Duration::from_millis(period)).map(|_| Message::Tick),
-            time::every(Duration::from_millis(500)).map(|_| Message::CheckOpen),
-        ])
+        // nmcli every 2 s while the menu is open, 5 s otherwise; a message (and a redraw)
+        // only when something changed.
+        let status = Subscription::run_with(self.popup.is_some(), |open| {
+            let period = Duration::from_millis(if *open { 2000 } else { 5000 });
+            // Saved networks only change when the user saves one: reuse the last list.
+            watch::changes(period, |last: Option<net::State>| net::gather(false, last.map(|s| s.known_ssids())))
+        });
+        Subscription::batch([status.map(Message::Refreshed), watch::open_requests(APP_ID).map(|_| Message::OpenRequest)])
     }
 
     fn on_close_requested(&self, id: window::Id) -> Option<Message> {

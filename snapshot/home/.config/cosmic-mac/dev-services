@@ -1,0 +1,8 @@
+# Developer services in the top bar's Developer menu, one per line:  unit  Label
+# Put --user in front of a unit that runs as you (systemctl --user).
+mariadb.service MariaDB
+postgresql.service PostgreSQL
+nginx.service nginx
+php-fpm.service PHP-FPM
+supervisord.service Supervisor
+--user supervisor-studio.service Supervisor Studio

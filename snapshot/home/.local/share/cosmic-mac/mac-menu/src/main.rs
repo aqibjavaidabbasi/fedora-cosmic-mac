@@ -5,15 +5,19 @@
 //! App menu: Hide <App>, Hide Others, Quit <App> (done by cosmic-maximize-to-workspace --app).
 //! The focused app comes from $XDG_RUNTIME_DIR/cosmic-mac/focused, written by the
 //! maximize helper. The logo is the icon chosen in Control Center → Edit Controls.
+//! Both are watched with inotify (shared/watch.rs): no timer, and a redraw only when the
+//! focused app or the logo actually changes (not on every window title change).
 
 #[path = "../../shared/style.rs"]
 mod style;
+#[path = "../../shared/watch.rs"]
+mod watch;
 
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use cosmic::{
     Element, Task, app,
-    iced::{Alignment, Length, Subscription, time, window},
+    iced::{Alignment, Length, Subscription, window},
     surface,
     theme::Button,
     widget::{Column, button, icon, row, text},
@@ -30,24 +34,26 @@ fn home() -> String {
     std::env::var("HOME").unwrap_or_default()
 }
 
+fn logo_conf() -> String {
+    format!("{}/.config/cosmic/com.system76.CosmicPanelButton/v1/configs", home())
+}
+
 /// The icon chosen for the left-most bar button in Control Center → Edit Controls.
-fn logo() -> String {
-    let conf = format!("{}/.config/cosmic/com.system76.CosmicPanelButton/v1/configs", home());
-    std::fs::read_to_string(conf)
-        .ok()
-        .and_then(|t| {
-            let line = t.lines().find(|l| l.contains("\"*/com.system76.CosmicAppLibrary\""))?.to_string();
-            let rest = line.split("icon: Some(\"").nth(1)?;
-            Some(rest.split('"').next()?.to_string())
-        })
+fn logo(conf: &str) -> String {
+    conf.lines()
+        .find(|l| l.contains("\"*/com.system76.CosmicAppLibrary\""))
+        .and_then(|line| line.split("icon: Some(\"").nth(1)?.split('"').next().map(str::to_string))
         .unwrap_or_else(|| "distributor-logo-fedora".to_string())
 }
 
-fn focused() -> (String, String) {
+/// "app id\ntitle", written by the maximize helper.
+fn focused_path() -> String {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let t = std::fs::read_to_string(format!("{dir}/cosmic-mac/focused")).unwrap_or_default();
-    let mut l = t.lines();
-    (l.next().unwrap_or("").to_string(), l.next().unwrap_or("").to_string())
+    format!("{dir}/cosmic-mac/focused")
+}
+
+fn app_id_line(focused: &str) -> String {
+    focused.lines().next().unwrap_or("").to_string()
 }
 
 /// "Name=" of the app's .desktop file, else a tidied app id.
@@ -99,7 +105,8 @@ enum Which {
 enum Message {
     Toggle(Which),
     CloseRequested(window::Id),
-    Tick,
+    Focused(String),
+    Logo(String),
     Run(&'static str, Vec<String>),
     AppAction(&'static str),
 }
@@ -109,6 +116,8 @@ struct MacMenu {
     core: app::Core,
     popup: Option<(window::Id, Which)>,
     logo: String,
+    /// latest focused app; shown once no menu is open
+    focused: String,
     app_id: String,
     name: String,
     names: HashMap<String, String>,
@@ -116,19 +125,20 @@ struct MacMenu {
 
 impl MacMenu {
     fn close(&mut self) -> app::Task<Message> {
-        match self.popup.take() {
+        let task = match self.popup.take() {
             Some((p, _)) => surface::surface_task(surface::action::destroy_popup(p)),
             None => Task::none(),
-        }
+        };
+        self.show_focused();
+        task
     }
 
-    fn refresh(&mut self) {
-        self.logo = logo();
+    fn show_focused(&mut self) {
         // keep the app the menu was opened for while it is open
         if self.popup.is_some() {
             return;
         }
-        let (id, _title) = focused();
+        let id = self.focused.clone();
         if id != self.app_id {
             self.name = if id.is_empty() {
                 DESKTOP_NAME.to_string()
@@ -148,7 +158,9 @@ impl cosmic::Application for MacMenu {
 
     fn init(core: app::Core, _flags: ()) -> (Self, app::Task<Message>) {
         let mut app = Self { core, ..Default::default() };
-        app.refresh();
+        app.logo = logo(&std::fs::read_to_string(logo_conf()).unwrap_or_default());
+        app.focused = app_id_line(&std::fs::read_to_string(focused_path()).unwrap_or_default());
+        app.show_focused();
         (app, Task::none())
     }
 
@@ -187,9 +199,14 @@ impl cosmic::Application for MacMenu {
             Message::CloseRequested(id) => {
                 if self.popup.is_some_and(|p| p.0 == id) {
                     self.popup = None;
+                    self.show_focused();
                 }
             }
-            Message::Tick => self.refresh(),
+            Message::Focused(id) => {
+                self.focused = id;
+                self.show_focused();
+            }
+            Message::Logo(logo) => self.logo = logo,
             Message::Run(cmd, args) => {
                 let args: Vec<&str> = args.iter().map(String::as_str).collect();
                 spawn(cmd, &args);
@@ -269,7 +286,10 @@ impl cosmic::Application for MacMenu {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        time::every(Duration::from_millis(300)).map(|_| Message::Tick)
+        Subscription::batch([
+            watch::file(focused_path(), app_id_line).map(Message::Focused),
+            watch::file(logo_conf(), logo).map(Message::Logo),
+        ])
     }
 
     fn on_close_requested(&self, id: window::Id) -> Option<Message> {
