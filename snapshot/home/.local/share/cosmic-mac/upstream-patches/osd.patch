@@ -1,8 +1,8 @@
 diff --git a/src/components/app.rs b/src/components/app.rs
-index dd642f4..abc9e5d 100644
+index edc50c7..0ec4cc0 100644
 --- a/src/components/app.rs
 +++ b/src/components/app.rs
-@@ -1374,6 +1374,29 @@ impl cosmic::Application for App {
+@@ -1387,6 +1387,29 @@ impl cosmic::Application for App {
                  HashMap::from_iter(vec![("action", action)])
              );
              let countdown = &countdown.to_string();

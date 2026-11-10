@@ -173,14 +173,6 @@ pub fn separator<'a, M: 'a>() -> Element<'a, M> {
     container(divider::horizontal::light()).padding([5, 14]).width(Length::Fill).into()
 }
 
-/// True once when `$XDG_RUNTIME_DIR/cosmic-mac/open/<app id>` exists (the file is removed).
-/// Lets scripts and keyboard shortcuts open a popover:
-///   mkdir -p $XDG_RUNTIME_DIR/cosmic-mac/open && touch $XDG_RUNTIME_DIR/cosmic-mac/open/<app id>
-pub fn open_requested(app_id: &str) -> bool {
-    let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") else { return false };
-    std::fs::remove_file(format!("{dir}/cosmic-mac/open/{app_id}")).is_ok()
-}
-
 /// Small grey caption (11px), e.g. the subtitle under a Control Center tile.
 pub fn secondary_small<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
     text::caption(s.into())

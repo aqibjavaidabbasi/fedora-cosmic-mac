@@ -42,6 +42,16 @@ for b in "$D"/bin/* "$HOME"/.local/bin/cosmic-mac-* "$HOME/.local/bin/cosmic-max
 done
 
 stale() { [ -n "$FORCE" ] || [ "$1" != "$(cat "$D/$2" 2>/dev/null)" ]; }
+# newer <file> <paths…>: some source (.rs, .py, Cargo.toml) under <paths> changed after <file> was built
+newer() { local b=$1; shift; [ -e "$b" ] && [ -n "$(find "$@" -type f \( -name '*.rs' -o -name '*.py' -o -name Cargo.toml \) -newer "$b" -print -quit 2>/dev/null)" ]; }
+# Helper apps (folder:binary): rebuilt when missing, forced, or their sources or shared/ changed.
+HELPERS="control-center:cosmic-mac-control-center battery:cosmic-mac-battery wifi:cosmic-mac-wifi bluetooth:cosmic-mac-bluetooth
+stats:cosmic-mac-stats mac-menu:cosmic-mac-menu separator:cosmic-mac-separator dev:cosmic-mac-dev autoquit:cosmic-mac-autoquit"
+helper_stale() { [ ! -x "$HOME/.local/bin/$2" ] || newer "$HOME/.local/bin/$2" "$D/$1" "$D/shared"; }
+helpers_current() { local h; for h in $HELPERS; do helper_stale "${h%%:*}" "${h#*:}" && return 1; done; return 0; }
+# The Notification Center patch (or the code it copies in) changed: rebuild it.
+newer "$D/bin/cosmic-applet-notifications" "$D/patches/notifications.py" "$D/patches/mac_widgets.rs" "$D/shared/watch.rs" \
+    && rm -f "$D/cosmic-applet-notifications-built-version"
 if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$AVER" cosmic-applet-notifications-built-version \
    && ! stale "$AVER" cosmic-app-list-built-version \
@@ -56,17 +66,24 @@ if ! stale "$VER" built-version && ! stale "$AVER" applets-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-term 2>/dev/null)" cosmic-term-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-edit 2>/dev/null)" cosmic-edit-built-version \
    && ! stale "$(rpm -q --qf '%{VERSION}' cosmic-player 2>/dev/null)" cosmic-player-built-version \
-   && [ -x "$HOME/.local/bin/cosmic-mac-control-center" ] && [ -x "$HOME/.local/bin/cosmic-mac-battery" ] \
-   && [ -x "$HOME/.local/bin/cosmic-mac-wifi" ] && [ -x "$HOME/.local/bin/cosmic-mac-bluetooth" ] \
-   && [ -x "$HOME/.local/bin/cosmic-mac-stats" ] && [ -x "$HOME/.local/bin/cosmic-mac-menu" ]; then
+   && helpers_current; then
     echo "Already built for COSMIC $VER (applets $AVER, Fedora $REL)."
     exit 0
 fi
 echo "$(date): rebuilding for COSMIC $VER, applets $AVER, Fedora $REL"
-notify "Updating your COSMIC customizations" "Rebuilding for COSMIC $VER. This can take about 25 minutes; COSMIC works normally meanwhile."
+notify "Updating your COSMIC customizations" "Rebuilding for COSMIC $VER. This can take 30-60 minutes; COSMIC works normally meanwhile."
 
 export RUSTC_BOOTSTRAP=1 CARGO_NET_GIT_FETCH_WITH_CLI=true
 export CARGO_TARGET_DIR=$HOME/.cache/cosmic-mac/target
+# Faster builds: one compiler cache shared by every component (sccache), no link-time
+# optimization and parallel codegen for these local builds, and the mold linker (via cc-mold).
+command -v sccache >/dev/null && export RUSTC_WRAPPER=sccache SCCACHE_DIR=$HOME/.cache/cosmic-mac/sccache SCCACHE_CACHE_SIZE=40G
+export CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_INCREMENTAL=0
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=$D/cc-mold
+
+# At login the network may not be up yet; wait up to 5 minutes for GitHub.
+for _ in $(seq 60); do getent hosts github.com >/dev/null && break; sleep 5; done
+getent hosts github.com >/dev/null || fail "no network: github.com could not be reached"
 mkdir -p "$D/bin" "$U"
 
 # checkout <folder> <github repo> <tag>: fresh shallow checkout of an upstream tag
@@ -121,6 +138,8 @@ if stale "$VER" built-version; then
     if [ -f "$SRC/Cargo.lock" ]; then
         REV=$(grep -A2 'name = "cosmic-protocols"' "$SRC/Cargo.lock" | grep -o '#[0-9a-f]\{40\}' | tr -d '#' | head -1)
         LIBCOSMIC=$(grep -A2 'name = "cosmic-theme"' "$SRC/Cargo.lock" | grep -o '#[0-9a-f]\{40\}' | tr -d '#' | head -1)
+        # the auto-quit daemon talks the same protocols (built with the helper apps below)
+        [ -n "$REV" ] && sed -i "s/rev = \"[0-9a-f]\{40\}\"/rev = \"$REV\"/" "$D/autoquit/Cargo.toml"
         cd "$D/maximize-helper"
         [ -n "$REV" ] && sed -i "s/rev = \"[0-9a-f]\{40\}\"/rev = \"$REV\"/" Cargo.toml
         if nice -n 19 cargo build --release -Zgit=shallow-deps; then
@@ -221,10 +240,10 @@ SV=$(rpm -q --qf '%{VERSION}' cosmic-settings 2>/dev/null) && if stale "$SV" cos
     fi
 fi
 
-# --- Control Center and Battery (standalone; rebuilt when missing or forced) ---
+# --- Control Center, Battery and the other helper apps (standalone) -----------
 build_app() {
     local dir=$1 bin=$2
-    [ -z "$FORCE" ] && [ -x "$HOME/.local/bin/$bin" ] && return 0
+    [ -z "$FORCE" ] && ! helper_stale "$dir" "$bin" && return 0
     cd "$D/$dir" || { FAILED+=("$bin"); return; }
     if CARGO_TARGET_DIR=$HOME/.cache/cosmic-mac/target-helper nice -n 19 cargo build --release -Zgit=shallow-deps; then
         install -m755 "$HOME/.cache/cosmic-mac/target-helper/release/$bin" "$HOME/.local/bin/$bin.new" \
@@ -233,13 +252,11 @@ build_app() {
         FAILED+=("$bin")
     fi
 }
-build_app control-center cosmic-mac-control-center
-build_app battery cosmic-mac-battery
-build_app wifi cosmic-mac-wifi
-build_app bluetooth cosmic-mac-bluetooth
-build_app stats cosmic-mac-stats
-build_app mac-menu cosmic-mac-menu
-build_app separator cosmic-mac-separator
+for h in $HELPERS; do build_app "${h%%:*}" "${h#*:}"; done
+
+# Icons the helper apps use (e.g. the Developer menu's)
+mkdir -p "$HOME/.local/share/icons/hicolor/symbolic/apps"
+cp "$D"/*/data/icons/*.svg "$HOME/.local/share/icons/hicolor/symbolic/apps/" 2>/dev/null || true
 
 # Settings are NOT re-applied here, so anything changed in COSMIC Settings survives
 # updates. Only the per-display top bars are refreshed from their template.

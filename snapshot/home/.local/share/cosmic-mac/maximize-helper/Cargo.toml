@@ -5,7 +5,7 @@ edition = "2024"
 description = "macOS-like: maximized/fullscreen windows get their own workspace on COSMIC"
 
 [dependencies]
-cosmic-client-toolkit = { git = "https://github.com/pop-os/cosmic-protocols", rev = "32283d76a8d0342da74c4cc022a533c52dcf378f" }
+cosmic-client-toolkit = { git = "https://github.com/pop-os/cosmic-protocols", rev = "c0cff4db14c37ed954983158e4055aa94c7741d9" }
 
 [profile.release]
 lto = true

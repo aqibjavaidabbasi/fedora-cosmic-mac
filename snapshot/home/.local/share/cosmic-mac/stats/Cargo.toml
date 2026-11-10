@@ -13,6 +13,8 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "d4d71fd53e5ed6
     "wayland",
 ] }
 tokio = { version = "1", features = ["process", "time"] }
+inotify = "0.11"
+libc = "0.2"
 
 [profile.release]
 lto = "thin"

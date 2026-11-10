@@ -4,7 +4,8 @@
 //!   [Wi-Fi      ] [ Now Playing  ]
 //!   [Bluetooth  ] [              ]
 //!   [Airplane   ] (Overview) (Displays)
-//!   (Dark)(Shot)  [Focus         ]
+//!   (Dark)(Shot)  (Sleep)       
+//!   [Focus         ]
 //!   [Display ─────────────────○  ]
 //!   [Sound   ─────○           (⎋)]
 //!   [Record Selection] [Capture  ]
@@ -19,6 +20,8 @@
 
 #[path = "../../shared/style.rs"]
 mod style;
+#[path = "../../shared/watch.rs"]
+mod watch;
 #[path = "../../shared/net.rs"]
 mod net;
 #[path = "../../shared/bt.rs"]
@@ -63,8 +66,8 @@ struct Drag {
     last_target: Option<String>,
 }
 
-const DEFAULT_TILES: [&str; 16] = [
-    "wifi", "media", "bluetooth", "airplane", "overview", "displays", "appearance", "screenshot", "focus", "touch",
+const DEFAULT_TILES: [&str; 17] = [
+    "wifi", "media", "bluetooth", "airplane", "overview", "displays", "appearance", "screenshot", "sleep", "focus", "touch",
     "display", "sound", "rec-sel", "capture", "rec-screen", "record",
 ];
 
@@ -79,6 +82,7 @@ fn tile_info(id: &str) -> (&'static str, usize, usize, bool) {
         "displays" => ("Displays", 1, 3, true),
         "appearance" => ("Appearance", 1, 3, true),
         "screenshot" => ("Screenshot", 1, 3, true),
+        "sleep" => ("Sleep", 1, 3, true),
         "focus" => ("Focus", 2, 3, true),
         "touch" => ("Touch", 2, 3, true),
         "display" => ("Display", 4, 4, false),
@@ -238,7 +242,7 @@ struct ControlCenter {
 enum Message {
     TogglePopup,
     CloseRequested(window::Id),
-    CheckOpen,
+    OpenRequest(String),
     Refresh,
     Refreshed(Status),
     Wifi,
@@ -274,6 +278,7 @@ enum Message {
     ToggleWide(String),
     ResetLayout,
     EditWidgets,
+    Sleep,
     Lock,
     LogOut,
     Restart,
@@ -892,6 +897,7 @@ impl ControlCenter {
             "displays" => small("video-display-symbolic", "Displays", None, false, Message::Open("displays")),
             "appearance" => small("display-brightness-symbolic", "Appearance", Some(if s.dark { "Dark" } else { "Light" }.to_string()), !s.dark, Message::DarkMode),
             "screenshot" => small("camera-photo-symbolic", "Screenshot", None, false, Message::Screenshot),
+            "sleep" => small("system-suspend-symbolic", "Sleep", None, false, Message::Sleep),
             "focus" => pill("weather-clear-night-symbolic", "Focus", s.dnd.then(|| "Do Not Disturb".to_string()), s.dnd, Message::Focus, w),
             "touch" => {
                 let t = s.touch.as_ref();
@@ -995,29 +1001,25 @@ impl cosmic::Application for ControlCenter {
                     self.popup = None;
                 }
             }
-            Message::CheckOpen => {
+            Message::OpenRequest(page) => {
                 // The request file may name a page: `echo wifi > …/open/<app id>` opens Wi-Fi.
-                let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
-                let page = std::fs::read_to_string(format!("{dir}/cosmic-mac/open/{APP_ID}")).unwrap_or_default();
-                if style::open_requested(APP_ID) {
-                    let target = match page.trim() {
-                        "wifi" => Page::Wifi,
-                        "bluetooth" => Page::Bluetooth,
-                        "customize" => Page::Customize,
-                        _ => Page::Main,
-                    };
-                    let opening = self.popup.is_none();
-                    let arrange = page.trim() == "arrange";
-                    let toggle = self.update(Message::TogglePopup);
-                    if opening && target != Page::Main {
-                        return Task::batch([toggle, self.update(Message::ShowPage(target))]);
-                    }
-                    if opening && arrange {
-                        // `echo arrange > …/open/<app id>` opens straight into tile arranging
-                        return Task::batch([toggle, self.update(Message::Arrange(true))]);
-                    }
-                    return toggle;
+                let target = match page.trim() {
+                    "wifi" => Page::Wifi,
+                    "bluetooth" => Page::Bluetooth,
+                    "customize" => Page::Customize,
+                    _ => Page::Main,
+                };
+                let opening = self.popup.is_none();
+                let arrange = page.trim() == "arrange";
+                let toggle = self.update(Message::TogglePopup);
+                if opening && target != Page::Main {
+                    return Task::batch([toggle, self.update(Message::ShowPage(target))]);
                 }
+                if opening && arrange {
+                    // `echo arrange > …/open/<app id>` opens straight into tile arranging
+                    return Task::batch([toggle, self.update(Message::Arrange(true))]);
+                }
+                return toggle;
             }
             Message::Refresh => {
                 return match self.page {
@@ -1296,6 +1298,10 @@ impl cosmic::Application for ControlCenter {
                 run("cosmic-workspaces", &[]);
                 return self.close_popup();
             }
+            Message::Sleep => {
+                run("systemctl", &["suspend"]);
+                return self.close_popup();
+            }
             Message::Lock => run("loginctl", &["lock-session"]),
             Message::LogOut => run("cosmic-osd", &["log-out"]),
             Message::Restart => run("cosmic-osd", &["restart"]),
@@ -1445,7 +1451,7 @@ impl cosmic::Application for ControlCenter {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let open = time::every(Duration::from_millis(500)).map(|_| Message::CheckOpen);
+        let open = watch::open_requests(APP_ID).map(Message::OpenRequest);
         if self.popup.is_some() || self.status.recording {
             Subscription::batch([open, time::every(Duration::from_secs(2)).map(|_| Message::Refresh)])
         } else {

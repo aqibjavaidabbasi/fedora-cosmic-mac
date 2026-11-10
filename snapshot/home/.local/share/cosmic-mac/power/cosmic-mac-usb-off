@@ -1,0 +1,53 @@
+#!/bin/bash
+# systemd system-sleep hook (installed by power/setup-root.sh as
+# /usr/lib/systemd/system-sleep/cosmic-mac-usb-off): before suspend, turn off every external
+# (hotplug) USB port and USB wakeup; after resume, turn them back on.
+#
+# Only ports the firmware marks "hotplug" (the USB-A/USB-C sockets) are touched. Internal
+# devices are left alone: camera and Bluetooth sit on "hardwired" ports, and the keyboard,
+# touchpad, power button and lid are not USB on the Surface Laptop 4 (Surface Aggregator,
+# GPIO), so waking with the lid or power button keeps working.
+#
+# Turning a port off disconnects its device (no data, no wakeups). Whether the 5 V power on
+# the socket is also cut depends on the USB controller having switchable port power (PPC);
+# the result is logged:  journalctl -t cosmic-mac-usb-off
+STATE=/run/cosmic-mac-usb-off
+log() { logger -t cosmic-mac-usb-off "$*"; }
+
+case "$1" in
+pre)
+    mkdir -p "$STATE"
+    : > "$STATE/ports"; : > "$STATE/wakeup"
+    for c in /sys/kernel/debug/usb/xhci/*/reg-cap; do
+        [ -r "$c" ] || continue
+        hcc=$(awk '/HCCPARAMS1/{print $3}' "$c")
+        [ -n "$hcc" ] && log "$(basename "$(dirname "$c")"): port power switching (PPC) $( (( hcc & 0x8 )) && echo supported || echo 'not supported: sockets keep 5 V, devices are only disconnected')"
+    done
+    # no USB device or controller may wake the laptop
+    for w in /sys/bus/usb/devices/*/power/wakeup /sys/bus/pci/drivers/xhci_hcd/*/power/wakeup; do
+        [ -w "$w" ] || continue
+        v=$(cat "$w")
+        [ "$v" = enabled ] && echo "$w" >> "$STATE/wakeup" && echo disabled > "$w"
+    done
+    for p in /sys/bus/usb/devices/usb*/*-0:1.0/usb*-port*; do
+        [ "$(cat "$p/connect_type" 2>/dev/null)" = hotplug ] || continue
+        [ "$(cat "$p/disable" 2>/dev/null)" = 0 ] || continue
+        dev=$(cat "$p/device/product" 2>/dev/null)
+        if echo 1 > "$p/disable" 2>/dev/null; then
+            echo "$p" >> "$STATE/ports"
+            log "off: ${p##*/}${dev:+ ($dev)}"
+        fi
+    done
+    ;;
+post)
+    while read -r p; do
+        [ -n "$p" ] && echo 0 > "$p/disable" 2>/dev/null && log "on: ${p##*/}"
+    done < "$STATE/ports" 2>/dev/null
+    while read -r w; do
+        [ -n "$w" ] && echo enabled > "$w" 2>/dev/null
+    done < "$STATE/wakeup" 2>/dev/null
+    rm -rf "$STATE"
+    date +%s > /run/cosmic-mac-last-resume
+    ;;
+esac
+exit 0

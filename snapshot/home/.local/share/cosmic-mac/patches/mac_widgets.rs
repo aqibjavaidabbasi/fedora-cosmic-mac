@@ -10,12 +10,17 @@
 //! Settings: ~/.config/cosmic-mac/widgets.conf (created on first run, "Edit Widgets" opens it).
 //! Data: Open-Meteo (weather, no key), ip-api.com (location when CITY=auto), Yahoo Finance
 //! chart API (quotes, no key), and .ics calendars under ~/.local/share/evolution/calendar.
+//! Data is refreshed only while the Notification Center is open (and when it opens).
 
 use std::time::{Duration, Instant};
 
+// shared/watch.rs (event-driven open requests), copied in by patches/notifications.py
+#[path = "mac_watch.rs"]
+mod watch;
+
 use cosmic::{
     Element,
-    iced::{Alignment, Background, Border, Color, Length, Subscription, gradient::Linear, Radians, time},
+    iced::{Alignment, Background, Border, Color, Length, Subscription, gradient::Linear, Radians, futures::{SinkExt, Stream}, stream},
     theme,
     widget::{Column, button, container, icon, row, space, svg, text},
 };
@@ -30,7 +35,7 @@ const GREEN: Color = Color::from_rgb(0.204, 0.78, 0.349); // #34C759
 #[derive(Clone, Debug)]
 pub enum Msg {
     Tick,
-    CheckOpen,
+    OpenRequest,
     Weather(Option<Weather>),
     Quotes(Vec<Quote>),
     Events(Vec<Event>),
@@ -352,11 +357,15 @@ fn clock_svg(h: i8, m: i8, s: i8, day: bool) -> Vec<u8> {
 }
 
 impl Widgets {
-    pub fn subscription(&self) -> Subscription<Msg> {
-        Subscription::batch([
-            time::every(Duration::from_secs(5)).map(|_| Msg::Tick),
-            time::every(Duration::from_millis(500)).map(|_| Msg::CheckOpen),
-        ])
+    /// `open`: the Notification Center is showing. Only then do the widgets tick (right away,
+    /// then every 5 s; each source still keeps its own refresh interval).
+    pub fn subscription(&self, open: bool) -> Subscription<Msg> {
+        let open_requests = watch::open_requests("com.system76.CosmicAppletNotifications").map(|_| Msg::OpenRequest);
+        if open {
+            Subscription::batch([Subscription::run(ticks).map(|_| Msg::Tick), open_requests])
+        } else {
+            open_requests
+        }
     }
 
     pub fn update(&mut self, msg: Msg) -> cosmic::iced::Task<Msg> {
@@ -403,14 +412,9 @@ impl Widgets {
                 self.quotes_at = None;
                 self.events_at = None;
             }
-            Msg::CheckOpen => {
-                // `touch $XDG_RUNTIME_DIR/cosmic-mac/open/com.system76.CosmicAppletNotifications`
-                // toggles the popover (scripts, keyboard shortcuts).
-                let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
-                if std::fs::remove_file(format!("{dir}/cosmic-mac/open/com.system76.CosmicAppletNotifications")).is_ok() {
-                    return cosmic::iced::Task::done(Msg::Close);
-                }
-            }
+            // `touch $XDG_RUNTIME_DIR/cosmic-mac/open/com.system76.CosmicAppletNotifications`
+            // toggles the popover (scripts, keyboard shortcuts).
+            Msg::OpenRequest => return cosmic::iced::Task::done(Msg::Close),
             Msg::Close => {}
         }
         cosmic::iced::Task::none()
@@ -662,4 +666,35 @@ impl Widgets {
         .padding([6, 12])
         .into()
     }
+}
+
+/// A tick right away, then every 5 s (only subscribed while the Notification Center is open).
+fn ticks() -> impl Stream<Item = ()> {
+    stream::channel(1, |mut tx: cosmic::iced::futures::channel::mpsc::Sender<()>| async move {
+        while tx.send(()).await.is_ok() {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    })
+}
+
+/// A tick at the start of every minute, for the clock in the top bar. Looks at the wall clock
+/// at least every 5 s (sends nothing in between), so it is right straight after waking up.
+pub fn minutes() -> impl Stream<Item = ()> {
+    stream::channel(1, |mut tx: cosmic::iced::futures::channel::mpsc::Sender<()>| async move {
+        let minute = || jiff::Zoned::now().strftime("%Y%m%d%H%M").to_string();
+        let mut last = minute();
+        loop {
+            let now = jiff::Zoned::now();
+            let into = Duration::from_secs(now.second() as u64) + Duration::from_nanos(now.subsec_nanosecond().max(0) as u64);
+            let wait = Duration::from_secs(60).saturating_sub(into).min(Duration::from_secs(5));
+            tokio::time::sleep(wait + Duration::from_millis(20)).await;
+            let m = minute();
+            if m != last {
+                last = m;
+                if tx.send(()).await.is_err() {
+                    return;
+                }
+            }
+        }
+    })
 }

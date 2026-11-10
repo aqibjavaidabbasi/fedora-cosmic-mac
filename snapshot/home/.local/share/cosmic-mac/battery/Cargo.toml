@@ -15,6 +15,7 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "d4d71fd53e5ed6
 tokio = { version = "1", features = ["macros", "time"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 futures = "0.3"
+inotify = "0.11"
 
 [profile.release]
 lto = "thin"

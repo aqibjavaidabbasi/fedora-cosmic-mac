@@ -15,9 +15,10 @@ cp -a "$HOME"/.config/systemd/user/cosmic-mac-* "$S/.config/systemd/user/"
 cp -a "$HOME/.config/autostart/cosmic-maximize-to-workspace.desktop" "$S/.config/autostart/"
 rsync -a --delete "$HOME/.local/state/cosmic" "$HOME/.local/state/cosmic-comp" "$S/.local/state/"
 # Toolkit: scripts, patches, saved upstream diffs, helper app sources.
-# Not: binaries, upstream checkouts, and per-machine build stamps/logs.
+# Not: binaries, upstream checkouts, per-machine build stamps/logs, backups and power measurements.
 rsync -a --delete --exclude bin/ --exclude build/ --exclude __pycache__/ --exclude target/ \
     --exclude .lock --exclude '*built-version' --exclude rebuild.log --exclude '*.orig' \
+    --exclude backups/ --exclude power-diag/ --exclude measurements.txt --exclude '*.bak*' --exclude '*.log' \
     "$M" "$S/.local/share/"
 for f in "$HOME"/.local/bin/cosmic-*; do                # launcher scripts only, not binaries
     file -b "$f" | grep -q text && cp -a "$f" "$S/.local/bin/"

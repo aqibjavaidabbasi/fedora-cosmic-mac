@@ -1,12 +1,12 @@
 diff --git a/i18n/en/cosmic_store.ftl b/i18n/en/cosmic_store.ftl
-index 84b93ec..ed75b05 100644
+index bf7f822..bf88f34 100644
 --- a/i18n/en/cosmic_store.ftl
 +++ b/i18n/en/cosmic_store.ftl
 @@ -1,4 +1,4 @@
 -app-name = COSMIC Store
 +app-name = App Store
  comment = Application store for the COSMIC desktop
- keywords = App;Software;Store;Shop;
+ keywords = App;Package;Program;Software;Store;Shop;Repository;Source;Install;Uninstall;Add;Remove;Update;Upgrade;Flatpak;
  back = Back
 diff --git a/res/com.system76.CosmicStore.desktop b/res/com.system76.CosmicStore.desktop
 index baba511..4b5b9d8 100644
@@ -20,18 +20,18 @@ index baba511..4b5b9d8 100644
  Exec=cosmic-store %u
  Terminal=false
 diff --git a/src/main.rs b/src/main.rs
-index 9f5a89a..3bf8467 100644
+index 2d01d13..8c956bd 100644
 --- a/src/main.rs
 +++ b/src/main.rs
-@@ -84,6 +84,7 @@ mod explore;
+@@ -88,6 +88,7 @@ mod explore;
  
  use nav::{Category, CategoryIndex, NavPage, ScrollContext};
  mod nav;
 +mod mac_store;
  
- use search::{CachedExploreResults, SearchResult};
+ use search::{CachedExploreResults, GridMetrics, SearchResult};
  mod search;
-@@ -281,6 +282,11 @@ impl CosmicFlags for Flags {
+@@ -285,6 +286,11 @@ impl CosmicFlags for Flags {
  /// Messages that are used specifically by our [`App`].
  #[derive(Clone, Debug)]
  pub enum Message {
@@ -43,7 +43,7 @@ index 9f5a89a..3bf8467 100644
      AppTheme(AppTheme),
      BackendUpdate(BackendName, Arc<dyn Backend>),
      BackendUpdateFinished,
-@@ -1647,7 +1653,14 @@ impl App {
+@@ -1741,7 +1747,14 @@ impl App {
  
      fn update_title(&mut self) -> Task<Message> {
          if let Some(window_id) = &self.core.main_window_id() {
@@ -59,7 +59,7 @@ index 9f5a89a..3bf8467 100644
          } else {
              Task::none()
          }
-@@ -2121,7 +2134,10 @@ impl Application for App {
+@@ -2217,7 +2230,10 @@ impl Application for App {
          }
  
          match app.mode {
@@ -71,7 +71,7 @@ index 9f5a89a..3bf8467 100644
              Mode::GStreamer { .. } => {
                  app.core.window.use_template = false;
              }
-@@ -2131,6 +2147,21 @@ impl Application for App {
+@@ -2239,6 +2255,21 @@ impl Application for App {
          (app, command)
      }
  
@@ -93,7 +93,7 @@ index 9f5a89a..3bf8467 100644
      fn nav_model(&self) -> Option<&widget::nav_bar::Model> {
          match self.mode {
              Mode::GStreamer { .. } => None,
-@@ -2213,7 +2244,8 @@ impl Application for App {
+@@ -2328,7 +2359,8 @@ impl Application for App {
  
      /// Handle application events here.
      fn update(&mut self, message: Self::Message) -> Task<Message> {
@@ -103,7 +103,7 @@ index 9f5a89a..3bf8467 100644
      }
  
      fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Message>> {
-@@ -2512,14 +2544,6 @@ impl Application for App {
+@@ -2632,14 +2664,6 @@ impl Application for App {
                  widget::id_container(
                      widget::column::with_capacity(2)
                          .spacing(space_xxs)
@@ -118,7 +118,7 @@ index 9f5a89a..3bf8467 100644
                          .push(
                              self.view_responsive(size)
                                  .apply(widget::container)
-@@ -2653,7 +2677,10 @@ impl Application for App {
+@@ -2773,7 +2797,10 @@ impl Application for App {
  
          // Uncomment to debug layout:
          //content.explain(cosmic::iced::Color::WHITE)
@@ -131,7 +131,7 @@ index 9f5a89a..3bf8467 100644
  
      fn view_window(&self, _id: window::Id) -> Element<'_, Message> {
 diff --git a/src/search.rs b/src/search.rs
-index db24543..04cee40 100644
+index d1e8fc2..d3a2df5 100644
 --- a/src/search.rs
 +++ b/src/search.rs
 @@ -311,6 +311,16 @@ impl SearchResult {
@@ -150,9 +150,9 @@ index db24543..04cee40 100644
 +        }))
          .into()
      }
- }
+ 
 diff --git a/src/update.rs b/src/update.rs
-index 13ec62e..4aaa535 100644
+index 7ce1cf5..a7cc3e3 100644
 --- a/src/update.rs
 +++ b/src/update.rs
 @@ -60,6 +60,11 @@ impl App {
@@ -168,10 +168,10 @@ index 13ec62e..4aaa535 100644
                  config_set!(app_theme, app_theme);
                  return self.update_config();
 diff --git a/src/view.rs b/src/view.rs
-index 7631c76..833689a 100644
+index 84f4620..fd45215 100644
 --- a/src/view.rs
 +++ b/src/view.rs
-@@ -787,77 +787,7 @@ impl App {
+@@ -888,71 +888,7 @@ impl App {
                                          .height(Length::Fixed(size.height))
                                          .into()
                                  } else {
@@ -189,16 +189,10 @@ index 7631c76..833689a 100644
 -                                                        &spacing, grid_width,
 -                                                    );
 -
--                                                let max_results = match cols {
--                                                    1 => 4,
--                                                    2 => 8,
--                                                    3 => 9,
--                                                    _ => cols * 2,
--                                                };
--
--                                                //TODO: adjust results length based on app size?
--                                                let results_len =
--                                                    cmp::min(results.len(), max_results);
+-                                                let max_results =
+-                                                    Self::explore_section_max_results(cols);
+-                                            let results_len =
+-                                                cmp::min(results.len(), max_results);
 -
 -                                                column = column.push(
 -                                                    widget::column::with_children(vec![

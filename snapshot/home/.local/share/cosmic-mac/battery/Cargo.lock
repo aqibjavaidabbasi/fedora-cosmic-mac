@@ -973,6 +973,7 @@ name = "cosmic-mac-battery"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "inotify",
  "libcosmic",
  "tokio",
  "zbus",
@@ -2511,8 +2512,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "153be1941a183ec9ccd095ddbe17a8b8d435ef6c76e9e02451b933c3999af2c8"
 dependencies = [
  "bitflags 2.13.0",
+ "futures-util",
  "inotify-sys",
  "libc",
+ "tokio",
 ]
 
 [[package]]

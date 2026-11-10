@@ -1,0 +1,33 @@
+#!/bin/bash
+# Suspend when the lid closes, even with an external display connected.
+# (Installed by power/setup-root.sh as /usr/local/libexec/cosmic-mac-lid-docked and run by
+# cosmic-mac-lid-docked.service.)
+#
+# With an external display connected, COSMIC's compositor holds a "handle-lid-switch"
+# block lock so that closing the lid only turns the laptop screen off; logind always honours
+# that kind of lock. This watches logind's LidClosed property instead and suspends when the
+# lid goes from open to closed while such a lock is held. Without the lock logind suspends
+# by itself (logind.conf.d/zz-cosmic-mac-lid-suspend.conf), so nothing is done twice.
+log() { logger -t cosmic-mac-lid-docked "$*"; }
+
+last=$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager LidClosed 2>/dev/null | awk '{print $2}')
+log "watching the lid (now ${last:-unknown})"
+
+gdbus monitor --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 | while read -r line; do
+    case "$line" in
+        *"'LidClosed': <true>"*) now=true ;;
+        *"'LidClosed': <false>"*) now=false ;;
+        *) continue ;;
+    esac
+    prev=$last; last=$now
+    [ "$prev" = false ] && [ "$now" = true ] || continue
+    # just woke up (with the lid still closed): don't go straight back to sleep
+    resumed=$(cat /run/cosmic-mac-last-resume 2>/dev/null || echo 0)
+    (( $(date +%s) - resumed < 10 )) && continue
+    sleep 1
+    # still closed, and blocked by the docked-display lock (else logind handles it)
+    [ "$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager LidClosed | awk '{print $2}')" = true ] || continue
+    systemd-inhibit --list --no-legend --no-pager 2>/dev/null | grep -q 'handle-lid-switch.*block' || continue
+    log "lid closed with an external display connected: suspending"
+    systemctl suspend
+done
