@@ -18,7 +18,7 @@ grep -q '^ID=fedora' /etc/os-release || { echo "This setup is for Fedora."; exit
 
 step "Installing COSMIC (if missing), build tools and fonts"
 rpm -q cosmic-comp >/dev/null 2>&1 || sudo dnf install -y @cosmic-desktop
-sudo dnf install -y git python3 rsync file flatpak libnotify gtk-update-icon-cache \
+sudo dnf install -y git python3 rsync file flatpak libnotify gtk-update-icon-cache nautilus \
     cargo rust dnf-plugins-core rsms-inter-fonts
 sudo dnf builddep -y cosmic-comp cosmic-applets cosmic-panel cosmic-workspaces cosmic-launcher cosmic-settings cosmic-app-library cosmic-osd cosmic-store cosmic-term cosmic-edit cosmic-player cosmic-notifications
 
@@ -43,8 +43,9 @@ flatpak remote-add --user --if-not-exists cosmic https://apt.pop-os.org/cosmic/c
 flatpak install --user -y --noninteractive cosmic \
     com.github.codevardhan.caffeine-applet || echo "Some applets failed to install; the rest still works."
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user -y --noninteractive flathub com.dec05eba.gpu_screen_recorder \
-    || echo "GPU Screen Recorder failed to install; the Control Center Record tiles will say Not Installed."
+flatpak install --user -y --noninteractive flathub \
+    com.dec05eba.gpu_screen_recorder io.github._0_don.clippy \
+    || echo "Some Flathub apps failed to install; screen recording or clipboard history may be unavailable."
 
 step "Backing up your current COSMIC settings"
 if [ -d ~/.config/cosmic ]; then
