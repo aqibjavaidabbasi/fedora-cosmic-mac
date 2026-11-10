@@ -21,7 +21,7 @@ A macOS-style COSMIC desktop for Fedora. It survives COSMIC and Fedora updates w
 - **App switcher:** Alt+Tab shows a macOS Command-Tab style row of big app icons, with the selected app's name under it.
 - **Extras:** overview thumbnails are centered, and there are a Mac-style system monitor and a caffeine applet.
 - **Developer menu:** a code-brackets item in the top bar (filled while any server runs) with a **Developer Services** switch (all on / all off) and one switch per service: MariaDB, PostgreSQL, nginx, PHP-FPM, Supervisor and Supervisor Studio. Edit the list with **Edit Services…** (`~/.config/cosmic-mac/dev-services`, one `unit Label` per line, `--user` in front of user units). Once `power/setup-root.sh` has run, the servers no longer start at boot and the switches need no password.
-- **Sleep:** a Sleep tile in the Control Center, Sleep in the logo menu, and **Super+Alt+S** (this replaces COSMIC's default Screen Reader shortcut; the screen reader stays in Settings > Accessibility). With `power/setup-root.sh`, closing the lid sleeps too (not while an external display is connected).
+- **Sleep:** a Sleep tile in the Control Center, Sleep in the logo menu, and **Super+Alt+S** (this replaces COSMIC's default Screen Reader shortcut; the screen reader stays in Settings > Accessibility). With `power/setup-root.sh`, closing the lid sleeps too, also with an external display connected, and while asleep the external USB ports are switched off and USB devices can't wake the laptop (`journalctl -t cosmic-mac-usb-off`).
 - **Auto-quit idle apps:** on battery, an app none of whose windows was focused for an hour gets a normal close request, like clicking its close button (unsaved work still asks; nothing is killed). Chat apps, browsers, terminals, editors, media players, the COSMIC shell and apps playing sound are left alone. Settings in `~/.config/cosmic-mac/auto-quit.conf`; `cosmic-mac-autoquit --list` shows each open app's id, and `journalctl --user -u cosmic-mac-autoquit` what was closed.
 - **Light on battery:** the top-bar items do no work while idle. They wait for events instead of polling (opening a menu from a shortcut, the focused app), check Wi-Fi, Bluetooth and the Developer menu on a slow timer, and redraw only when what they show changes. The system monitor samples every 2 s on power and every 5 s on battery. `power/measure.sh` samples battery draw, wakeups and CPU use.
 
@@ -52,7 +52,7 @@ Your wallpaper and dock apps are kept. To copy the original owner's exact deskto
 
 Run `./check.sh` any time to see that everything is active.
 
-Optional, for battery life (needs your password once): closing the lid sleeps, the Developer menu starts and stops servers without a password, and the dev servers no longer start at boot. `undo-root.sh` reverses it.
+Optional, for battery life (needs your password once): closing the lid sleeps (also with an external display), USB ports are off during sleep, the Developer menu starts and stops servers without a password, and the dev servers no longer start at boot. `undo-root.sh` reverses it.
 
 ```bash
 sudo bash ~/.local/share/cosmic-mac/power/setup-root.sh

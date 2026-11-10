@@ -1,0 +1,11 @@
+[Unit]
+Description=Suspend on lid close even with an external display connected (cosmic-mac)
+After=systemd-logind.service
+
+[Service]
+ExecStart=/usr/local/libexec/cosmic-mac-lid-docked
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
